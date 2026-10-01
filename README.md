@@ -192,3 +192,7 @@ Other platforms and releases may differ, so check the SNMP OIDs and `show` comma
 
 `python -m pytest` runs the suite offline. SNMP and SSH are replaced by fakes, and the SSH session driver is tested
 against a scripted transcript captured from a real Fabric Engine switch.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
