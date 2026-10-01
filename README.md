@@ -10,7 +10,9 @@ Spec: [docs/Extreme_Networks_Read-Only_MCP_Server_for_OCE.docx](docs/Extreme_Net
   `get_interface`, `get_interface_errors`, `get_lldp_neighbors`.
 - No generic command runner, SNMP SET, or write tools exist. Switches must be in the inventory allowlist.
 - Phase 2 (opt-in, `SSH_ENABLED=true`, Fabric Engine only): fixed read-only `show` commands over SSH.
-  Tools: `get_system_info`, `get_fabric_adjacencies`, `get_interface_detail`, `find_mac_address`.
+  Tools: `get_system_info`, `get_fabric_adjacencies`, `get_interface_detail`, `find_mac_address`, `get_switch_logs`.
+  Fabric Engine rejects one-off SSH commands, so each call opens an interactive CLI session, sends only the fixed
+  `show` command and answers the `--More--` pager.
   Needs a read-only switch account, `SSH_USERNAME` + `SSH_PASSWORD` (or `SSH_KEY_FILE`), and a pre-populated
   `known_hosts` (no trust-on-first-use). The commands live in `app/adapters/ssh.py`; verify each on hardware.
 - Phase 3 (NetWatch / XIQ) is not built yet.
