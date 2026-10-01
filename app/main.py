@@ -9,12 +9,14 @@ import os
 from mcp.server.fastmcp import FastMCP
 
 from app.adapters.snmp import SnmpClient
+from app.adapters.ssh import SshClient
 from app.audit import Audit
+from app.tools import ssh_tools as st
 from app.tools import switches as t
 from app.validation import Inventory
 
 
-def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit) -> FastMCP:
+def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient | None = None) -> FastMCP:
     host = os.environ.get("MCP_BIND_ADDRESS", "127.0.0.1")
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise SystemExit("MCP_BIND_ADDRESS must be loopback")
@@ -50,13 +52,39 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit) -> FastMCP:
         """Return LLDP neighbours and local-port mappings."""
         return await t.get_lldp_neighbors(inv, snmp, switch)
 
+    if ssh is not None:  # Phase 2: fixed read-only show commands, Fabric Engine only
+        @mcp.tool()
+        @audit.tool("get_system_info", "ssh")
+        async def get_system_info(switch: str) -> dict:
+            """Return detailed system, power, fan and temperature output (Fabric Engine)."""
+            return await st.get_system_info(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_fabric_adjacencies", "ssh")
+        async def get_fabric_adjacencies(switch: str) -> dict:
+            """Return IS-IS (SPB fabric) adjacencies for a Fabric Engine switch."""
+            return await st.get_fabric_adjacencies(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_interface_detail", "ssh")
+        async def get_interface_detail(switch: str, port: str) -> dict:
+            """Return detailed interface, statistics and error output for one port (e.g. '1/1')."""
+            return await st.get_interface_detail(inv, ssh, switch, port)
+
+        @mcp.tool()
+        @audit.tool("find_mac_address", "ssh")
+        async def find_mac_address(switch: str, mac: str) -> dict:
+            """Locate a MAC address in the switch forwarding table."""
+            return await st.find_mac_address(inv, ssh, switch, mac)
+
     return mcp
 
 
 def main() -> None:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
     inv = Inventory.load(os.environ.get("INVENTORY_FILE", "/etc/extreme-mcp/inventory.yaml"))
-    build_server(inv, SnmpClient(), Audit(os.environ.get("AUDIT_LOG"))).run(transport="streamable-http")
+    ssh = SshClient() if os.environ.get("SSH_ENABLED", "false").lower() == "true" else None
+    build_server(inv, SnmpClient(), Audit(os.environ.get("AUDIT_LOG")), ssh).run(transport="streamable-http")
 
 
 if __name__ == "__main__":
