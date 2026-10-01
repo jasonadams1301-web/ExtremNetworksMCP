@@ -51,7 +51,7 @@ class FakeProc:
             self.stdout.q.append(ERASE + self.pages[self.i] + ("\r\n" + PROMPT if last else self._more()))
             self.i += 1
         elif data == "q":
-            self.stdout.q.append(ERASE + "\r\n" + PROMPT)
+            self.stdout.q.append(ERASE + PROMPT)  # real switch: prompt follows the erasure, no newline
 
 
 PAGES = ["\r\n".join(f"1 2026-10-01T10:0{p}:0{n}.000-04:00 SW1 CP1 - 0x1 - 0 Mgmt SW INFO line {p}-{n}"

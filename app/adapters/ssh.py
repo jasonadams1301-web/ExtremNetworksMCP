@@ -32,7 +32,7 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
 MAX_OUTPUT = 20000
 MAX_PAGES = 40
 
-PROMPT_END = re.compile(r"(?:^|[\r\n])[^\s]+:\d+[>#] ?$")   # e.g. SWITCH-1:1>
+PROMPT_END = re.compile(r"(?:^|[\r\n\x08])[^\s\x08]+:\d+[>#] ?$")   # e.g. SWITCH-1:1> (may follow pager erasure)
 MORE = re.compile(r"--More--")
 MORE_TEXT = re.compile(r"--More--(?: \(q = quit\))? ?")
 ERASE = re.compile(r"(?:\x08 \x08)+|\x08")
