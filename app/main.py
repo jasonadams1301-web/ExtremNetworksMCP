@@ -20,7 +20,7 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
     host = os.environ.get("MCP_BIND_ADDRESS", "127.0.0.1")
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise SystemExit("MCP_BIND_ADDRESS must be loopback")
-    mcp = FastMCP("extreme-network-readonly", host=host, port=int(os.environ.get("MCP_PORT", "8000")))
+    mcp = FastMCP("extreme-network-readonly", host=host, port=int(os.environ.get("MCP_PORT", "8765")))
 
     @mcp.tool()
     @audit.tool("list_switches", "inventory")

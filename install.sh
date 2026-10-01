@@ -23,4 +23,4 @@ sudo systemctl daemon-reload
 
 echo "1. Edit /etc/extreme-mcp/inventory.yaml"
 echo "2. Store the secrets (prompts without echo):  bash set-secret.sh snmp_username   (then snmp_auth_password, snmp_priv_password)"
-echo "3. Start:  sudo systemctl enable --now extreme-mcp && sudo ss -lntp | grep ':8000'   # must show 127.0.0.1"
+echo "3. Start:  sudo systemctl enable --now extreme-mcp && sudo ss -lntp | grep ':8765'   # must show 127.0.0.1"
