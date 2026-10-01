@@ -2,7 +2,7 @@
 # Install extreme-mcp on the Ubuntu server (run from the project folder).
 #   bash install.sh
 # Code lives in /opt/extreme-mcp (root-owned, so the agent cannot change it); config in /etc/extreme-mcp.
-# SNMPv3 credentials are NOT written by this script: supply SNMP_USER / SNMP_AUTH_KEY / SNMP_PRIV_KEY
+# SNMPv3 credentials are NOT written by this script: supply SNMP_USERNAME / SNMP_AUTH_PASSWORD / SNMP_PRIV_PASSWORD
 # through systemd credentials or your secret store.
 set -euo pipefail
 cd "$(dirname "$0")"

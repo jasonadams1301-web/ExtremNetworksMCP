@@ -1,6 +1,6 @@
 """SNMPv3 (authPriv) read-only adapter. Only GET and bulk-walk are implemented; there is no SET.
 
-Credentials come from the environment (SNMP_USER, SNMP_AUTH_KEY, SNMP_PRIV_KEY) and never
+Credentials come from the environment (SNMP_USERNAME, SNMP_AUTH_PASSWORD, SNMP_PRIV_PASSWORD) and never
 appear in results or logs. Every OID must fall under an approved prefix.
 """
 import os
@@ -46,9 +46,9 @@ class SnmpClient:
     def _user(self) -> UsmUserData:
         try:
             return UsmUserData(
-                os.environ["SNMP_USER"],
-                authKey=os.environ["SNMP_AUTH_KEY"],
-                privKey=os.environ["SNMP_PRIV_KEY"],
+                os.environ["SNMP_USERNAME"],
+                authKey=os.environ["SNMP_AUTH_PASSWORD"],
+                privKey=os.environ["SNMP_PRIV_PASSWORD"],
                 authProtocol=AUTH[os.environ.get("SNMP_AUTH_PROTOCOL", "sha")],
                 privProtocol=PRIV[os.environ.get("SNMP_PRIV_PROTOCOL", "aes")],
             )

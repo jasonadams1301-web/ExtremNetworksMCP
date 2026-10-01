@@ -93,7 +93,7 @@ def test_adapter_has_no_set_operation():
 
 
 async def test_call_is_audited_without_secrets(server, monkeypatch):
-    monkeypatch.setenv("SNMP_AUTH_KEY", "TOPSECRETKEY")
+    monkeypatch.setenv("SNMP_AUTH_PASSWORD", "TOPSECRETKEY")
     mcp, snmp, audit_path = server
     await mcp.call_tool("get_switch_health", {"switch": "sw1"})
     event = json.loads(audit_path.read_text().splitlines()[0])
@@ -115,3 +115,18 @@ def test_non_loopback_bind_refused(inv, monkeypatch):
     monkeypatch.setenv("MCP_BIND_ADDRESS", "0.0.0.0")
     with pytest.raises(SystemExit):
         build_server(inv, FakeSnmp(), Audit(None))
+
+
+@pytest.mark.parametrize("missing", ["SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"])
+def test_authpriv_requires_all_three_credentials(monkeypatch, missing):
+    for k in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"):
+        monkeypatch.setenv(k, "value-for-test-12345")
+    monkeypatch.delenv(missing)
+    with pytest.raises(SnmpError, match="not configured"):
+        SnmpClient()._user()  # never falls back to noAuth or authNoPriv
+
+
+def test_authpriv_user_builds_with_all_three(monkeypatch):
+    for k in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"):
+        monkeypatch.setenv(k, "value-for-test-12345")
+    assert SnmpClient()._user().userName

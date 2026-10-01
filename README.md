@@ -23,5 +23,5 @@ python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # Li
 
 ## Run
 Copy `inventory.example.yaml` to `inventory.yaml` and `extreme-mcp.env.example` to `extreme-mcp.env`,
-export `SNMP_USER`, `SNMP_AUTH_KEY`, `SNMP_PRIV_KEY` (never commit them), then
+export `SNMP_USERNAME`, `SNMP_AUTH_PASSWORD`, `SNMP_PRIV_PASSWORD` (never commit them), then
 `INVENTORY_FILE=inventory.yaml python -m app.main`. Production install: `bash install.sh`.
