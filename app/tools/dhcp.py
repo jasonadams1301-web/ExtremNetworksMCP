@@ -185,6 +185,6 @@ async def get_dhcp_server_log(inv: Inventory, ssh: SshClient, switch: str, lines
            "oldest_entry_in_log": parse_log(text)[0]["time"] if total else None,
            "newest_entry_in_log": parse_log(text)[-1]["time"] if total else None,
            "note": "the DHCP server log is a short rolling window and can lag behind the switch clock (compare newest_entry_in_log with the current time; leases show current activity); routine lease-statistics polling is hidden "
-                   "unless include_noise is true; entries include client MAC addresses"}
+                   "unless include_noise is true; entries include client MAC addresses; any address in the entries is a DHCP client, not the switch (the switch's own address is management_ip)"}
     _warn_if_unparsed(out, "dhcp_log", text, total)
     return out

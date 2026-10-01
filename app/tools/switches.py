@@ -18,7 +18,8 @@ def _col(table: dict[str, str], base: str) -> dict[str, str]:
 
 
 async def list_switches(inv: Inventory) -> list[dict]:
-    return [{"name": s.name, "site": s.site, "platform": s.platform, "protocols": list(s.protocols)}
+    return [{"name": s.name, "management_ip": s.management_ip, "site": s.site, "platform": s.platform,
+             "protocols": list(s.protocols)}
             for s in inv.all()]
 
 

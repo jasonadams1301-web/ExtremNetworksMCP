@@ -218,3 +218,44 @@ async def test_dhcp_tools_reject_exos_unknown_and_unregistered_without_ssh(inv, 
     assert ssh.calls == []
     off = build_server(inv, SnmpClient(), Audit(None))
     assert tool not in {t.name for t in await off.list_tools()}
+
+
+# ---- the switch's own address is always stated, so the agent does not confuse it with the OCE host ----
+async def test_list_switches_includes_management_ip(inv):
+    mcp = server(inv, FakeSsh())
+    res = await mcp.call_tool("list_switches", {})
+    contents = res[0] if isinstance(res, tuple) else res        # list results arrive as one item per switch
+    rows = [json.loads(c.text) for c in contents]
+    assert {r["name"]: r["management_ip"] for r in rows} == {"fab1": "192.0.2.20", "exos1": "192.0.2.21"}
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("get_dhcp_server", {}), ("get_dhcp_leases", {}), ("get_dhcp_relay", {}), ("get_dhcp_server_log", {})])
+async def test_every_ssh_tool_result_states_management_ip(inv, tool, args):
+    out = await call(server(inv, FakeSsh()), tool, switch="fab1", **args)
+    assert out["switch"] == "fab1" and out["management_ip"] == "192.0.2.20"
+    assert list(out)[:2] == ["switch", "management_ip"]
+
+
+async def test_snmp_tool_result_states_management_ip(inv):
+    class Snmp(SnmpClient):
+        def __init__(self):
+            pass
+
+        async def get(self, ip, oids):
+            return {o: "x" for o in oids}
+
+        async def walk(self, ip, oid, limit=500):
+            return {}
+
+    mcp = build_server(inv, Snmp(), Audit(None))
+    out = await call(mcp, "get_switch_health", switch="fab1")
+    assert out["management_ip"] == "192.0.2.20"
+
+
+async def test_log_notes_say_host_in_log_lines_is_the_client_not_the_switch(inv):
+    out = await call(server(inv, FakeSsh()), "get_dhcp_server_log", switch="fab1")
+    assert "management_ip" in out["note"] and "not the switch" in out["note"]
+    from app.tools import ssh_tools
+    text = open(ssh_tools.__file__, encoding="utf-8").read()
+    assert "CLIENT that connected" in text and "management_ip" in text

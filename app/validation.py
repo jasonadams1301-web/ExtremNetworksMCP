@@ -48,6 +48,10 @@ class Inventory:
         ]
         return cls(switches)
 
+    def ip_of(self, name: str) -> str | None:
+        sw = self._by_name.get(name.lower()) if isinstance(name, str) else None
+        return sw.management_ip if sw else None
+
     def all(self) -> list[Switch]:
         return sorted(self._by_name.values(), key=lambda s: s.name)
 

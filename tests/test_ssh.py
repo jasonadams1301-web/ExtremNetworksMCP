@@ -175,3 +175,9 @@ async def test_logs_rejected_for_exos(server):
     with pytest.raises(Exception):
         await mcp.call_tool("get_switch_logs", {"switch": "exos1"})
     assert ssh.calls == []
+
+
+async def test_switch_logs_note_and_management_ip(server):
+    out, _ = await _logs(server)
+    assert out["management_ip"] == "192.0.2.20"
+    assert "CLIENT" in out["note"] and "NOT the switch" in out["note"] and "management_ip" in out["note"]
