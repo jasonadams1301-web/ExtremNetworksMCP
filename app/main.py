@@ -11,6 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from app.adapters.snmp import SnmpClient
 from app.adapters.ssh import SshClient
 from app.audit import Audit
+from app.tools import dhcp as dh
 from app.tools import ssh_tools as st
 from app.tools import switches as t
 from app.validation import Inventory
@@ -84,6 +85,35 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
             """Return the newest log entries from a Fabric Engine switch (lines 1-200). Optional severity
             (INFO, WARNING, ERROR, FATAL: that level and worse) and contains (text filter)."""
             return await st.get_switch_logs(inv, ssh, switch, lines, severity, contains)
+
+        @mcp.tool()
+        @audit.tool("get_dhcp_server", "ssh")
+        async def get_dhcp_server(switch: str) -> dict:
+            """Return whether the switch's built-in DHCP server is enabled, its settings, subnets with lease
+            utilization, and the number of host reservations (Fabric Engine)."""
+            return await dh.get_dhcp_server(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_dhcp_leases", "ssh")
+        async def get_dhcp_leases(switch: str, contains: str | None = None, subnet: str | None = None,
+                                  limit: int = 100) -> dict:
+            """Return DHCP server leases (IP, MAC, last transaction, expiry), most recent first. Optional
+            contains (IP or MAC fragment) and subnet (e.g. 10.0.0.0/24) filters; limit 1-200."""
+            return await dh.get_dhcp_leases(inv, ssh, switch, contains, subnet, limit)
+
+        @mcp.tool()
+        @audit.tool("get_dhcp_relay", "ssh")
+        async def get_dhcp_relay(switch: str) -> dict:
+            """Return DHCP relay interfaces with request/reply counters and their configured DHCP servers."""
+            return await dh.get_dhcp_relay(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_dhcp_server_log", "ssh")
+        async def get_dhcp_server_log(switch: str, lines: int = 50, level: str | None = None,
+                                      contains: str | None = None, include_noise: bool = False) -> dict:
+            """Return the newest DHCP server log entries (lines 1-200). Optional level (INFO, WARN, ERROR,
+            FATAL: that level and worse) and contains filter; routine polling is hidden unless include_noise."""
+            return await dh.get_dhcp_server_log(inv, ssh, switch, lines, level, contains, include_noise)
 
         @mcp.tool()
         @audit.tool("find_mac_address", "ssh")

@@ -6,9 +6,10 @@ placeholders whose values match a strict regex. Host keys are verified against a
 known_hosts file (no trust-on-first-use). Use a dedicated read-only account on the switches.
 
 Fabric Engine does not run one-off commands over an SSH exec channel, so each call opens an
-interactive CLI session, waits for the prompt, sends the single fixed command, answers the
---More-- pager (space to continue, q to stop) and closes. Only the command text and those two
-pager keys are ever sent. The session logs in fresh each time (the switch may authenticate via RADIUS).
+interactive CLI session, waits for the prompt, sends the fixed command(s), answers the
+--More-- pager (space to continue, q to stop) and closes. Only command text from the table and those
+two pager keys are ever sent. The session logs in fresh each call (the switch may authenticate via
+RADIUS), so tools that need several commands run them all in one session with run_many().
 """
 import asyncio
 import os
@@ -28,6 +29,13 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "interface": ("show interfaces gigabitEthernet interface {port}", {"port": PORT_RES["fabric"]}),
     "interface_stats": ("show interfaces gigabitEthernet statistics {port}", {"port": PORT_RES["fabric"]}),
     "interface_errors": ("show interfaces gigabitEthernet error {port}", {"port": PORT_RES["fabric"]}),
+    "dhcp_server": ("show ip dhcp-server", {}),
+    "dhcp_subnets": ("show ip dhcp-server subnet", {}),
+    "dhcp_hosts": ("show ip dhcp-server host", {}),
+    "dhcp_leases": ("show ip dhcp-server leases", {}),
+    "dhcp_log": ("show ip dhcp-server log", {}),
+    "dhcp_relay_counters": ("show ip dhcp-relay counters", {}),
+    "dhcp_relay_fwd": ("show ip dhcp-relay fwd-path", {}),
 }
 MAX_OUTPUT = 20000
 MAX_PAGES = 40
@@ -83,12 +91,8 @@ async def _read(proc, deadline: float) -> str:
     return chunk
 
 
-async def drive_session(proc, cmd: str, want_lines: int | None, max_chars: int, timeout: float) -> str:
-    """Wait for the CLI prompt, send `cmd`, page through output, return cleaned text."""
-    deadline = asyncio.get_running_loop().time() + timeout
-    buf = ""
-    while not PROMPT_END.search(buf):               # login banner, then the prompt
-        buf += await _read(proc, deadline)
+async def _command(proc, cmd: str, want_lines: int | None, max_chars: int, deadline: float) -> str:
+    """Send one command (the session is at a prompt), page through the output, return cleaned text."""
     proc.stdin.write(cmd + "\n")
     buf, seen, pages = "", 0, 0
     while True:
@@ -104,6 +108,19 @@ async def drive_session(proc, cmd: str, want_lines: int | None, max_chars: int, 
             proc.stdin.write("q" if enough else " ")
 
 
+async def drive_commands(proc, jobs: list[tuple[str, int | None, int]], timeout: float) -> list[str]:
+    """Wait for the CLI prompt, then run each (cmd, want_lines, max_chars) in turn within one session."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    buf = ""
+    while not PROMPT_END.search(buf):               # login banner, then the prompt
+        buf += await _read(proc, deadline)
+    return [await _command(proc, cmd, wl, mc, deadline) for cmd, wl, mc in jobs]
+
+
+async def drive_session(proc, cmd: str, want_lines: int | None, max_chars: int, timeout: float) -> str:
+    return (await drive_commands(proc, [(cmd, want_lines, max_chars)], timeout))[0]
+
+
 class SshClient:
     def __init__(self):
         self.known_hosts = os.environ.get("SSH_KNOWN_HOSTS", "/etc/extreme-mcp/known_hosts")
@@ -111,9 +128,15 @@ class SshClient:
         self.command_timeout = int(os.environ.get("SSH_COMMAND_TIMEOUT_SECONDS", "20"))
         self.sem = asyncio.Semaphore(int(os.environ.get("SSH_MAX_PARALLEL", "5")))
 
-    async def run(self, ip: str, key: str, *, want_lines: int | None = None,
-                  max_chars: int = MAX_OUTPUT, **args: str) -> str:
-        cmd = build_command(key, **args)
+    async def run(self, ip: str, key: str, *, want_lines: int | None = None, max_chars: int = MAX_OUTPUT,
+                  timeout: float | None = None, **args: str) -> str:
+        job = {"key": key, "args": args, "want_lines": want_lines, "max_chars": max_chars}
+        return (await self.run_many(ip, [job], timeout=timeout))[0]
+
+    async def run_many(self, ip: str, jobs: list[dict], *, timeout: float | None = None) -> list[str]:
+        """Run several fixed commands in ONE login. Each job: {key, args, want_lines, max_chars}."""
+        planned = [(build_command(j["key"], **j.get("args", {})), j.get("want_lines"),
+                    j.get("max_chars", MAX_OUTPUT)) for j in jobs]   # validate everything before connecting
         user, pw = get_secret("SSH_USERNAME"), get_secret("SSH_PASSWORD")
         keyfile = os.environ.get("SSH_KEY_FILE")
         if not user or not (pw or keyfile):
@@ -128,9 +151,9 @@ class SshClient:
                         connect_timeout=self.connect_timeout, login_timeout=self.connect_timeout) as conn:
                     proc = await conn.create_process(term_type="vt100", term_size=(250, 50),
                                                      encoding="utf-8", errors="replace")
-                    out = await drive_session(proc, cmd, want_lines, max_chars, self.command_timeout)
+                    outs = await drive_commands(proc, planned, timeout or self.command_timeout)
         except asyncssh.HostKeyNotVerifiable:
             raise SshError("host key verification failed") from None  # never auto-trust a changed key
         except (asyncssh.Error, OSError, asyncio.TimeoutError) as e:
             raise SshError(f"ssh failed: {type(e).__name__}") from None
-        return out[:max_chars]
+        return [out[:p[2]] for out, p in zip(outs, planned)]

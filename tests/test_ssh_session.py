@@ -92,3 +92,17 @@ async def test_driver_times_out_when_switch_goes_silent():
 def test_clean_output_strips_echo_prompt_and_erasures():
     raw = "show sys-info\r\r\nA\r\nB --More-- (q = quit) " + ERASE + "C\r\n" + PROMPT
     assert clean_output(raw, "show sys-info") == "A\nB C"
+
+
+async def test_driver_runs_several_commands_in_one_session():
+    from app.adapters.ssh import drive_commands
+
+    class Multi(FakeProc):
+        def _on_write(self, data):
+            if data.startswith("show"):
+                self.stdout.q.append(data.strip() + "\r\r\n" + f"result for {data.strip()}\r\n" + PROMPT)
+
+    proc = Multi(PAGES)
+    outs = await drive_commands(proc, [("show a", None, 1000), ("show b", None, 1000)], timeout=5)
+    assert outs == ["result for show a", "result for show b"]
+    assert proc.stdin.written == ["show a\n", "show b\n"]
