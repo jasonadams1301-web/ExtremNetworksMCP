@@ -124,7 +124,7 @@ async def get_dhcp_leases(inv: Inventory, ssh: SshClient, switch: str, contains:
         try:
             net = ipaddress.IPv4Network(subnet, strict=False)
         except ValueError:
-            raise ValidationError("subnet must be an IPv4 network such as 10.0.0.0/24") from None
+            raise ValidationError("subnet must be an IPv4 network such as 192.0.2.0/24") from None
     text = (await ssh.run_many(sw.management_ip, [{"key": "dhcp_leases", "max_chars": BIG}], timeout=60))[0]
     leases = parse_leases(text)
     total = len(leases)

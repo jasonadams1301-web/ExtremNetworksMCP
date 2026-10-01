@@ -161,7 +161,7 @@ async def test_leases_empty_table_is_not_a_parse_warning(inv):
     assert out["total_leases_on_switch"] == 0 and "parse_warnings" not in out
 
 
-@pytest.mark.parametrize("bad", [{"limit": 0}, {"limit": 201}, {"subnet": "10.0.0.0/33"}, {"subnet": "x; reload"},
+@pytest.mark.parametrize("bad", [{"limit": 0}, {"limit": 201}, {"subnet": "192.0.2.0/33"}, {"subnet": "x; reload"},
                                  {"contains": "a;b"}, {"contains": "$(id)"}])
 async def test_leases_bad_arguments_rejected_before_ssh(inv, bad):
     ssh = FakeSsh()
@@ -212,7 +212,7 @@ async def test_log_bad_arguments_rejected(inv, bad):
 async def test_dhcp_tools_reject_exos_unknown_and_unregistered_without_ssh(inv, tool):
     ssh = FakeSsh()
     mcp = server(inv, ssh)
-    for sw in ("exos1", "10.1.1.1"):
+    for sw in ("exos1", "203.0.113.1"):
         with pytest.raises(Exception):
             await mcp.call_tool(tool, {"switch": sw})
     assert ssh.calls == []

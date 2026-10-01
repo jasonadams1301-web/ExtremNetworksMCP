@@ -98,7 +98,7 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
         async def get_dhcp_leases(switch: str, contains: str | None = None, subnet: str | None = None,
                                   limit: int = 100) -> dict:
             """Return DHCP server leases (IP, MAC, last transaction, expiry), most recent first. Optional
-            contains (IP or MAC fragment) and subnet (e.g. 10.0.0.0/24) filters; limit 1-200."""
+            contains (IP or MAC fragment) and subnet (e.g. 192.0.2.0/24) filters; limit 1-200."""
             return await dh.get_dhcp_leases(inv, ssh, switch, contains, subnet, limit)
 
         @mcp.tool()
