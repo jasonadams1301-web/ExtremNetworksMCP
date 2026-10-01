@@ -20,6 +20,7 @@ from app.validation import PORT_RES, ValidationError
 # key -> (command template, {placeholder: validating regex})
 COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "sys_info": ("show sys-info", {}),
+    "log_tail": ("show logging file tail", {}),
     "isis_adjacencies": ("show isis adjacencies", {}),
     "mac_table": ("show vlan mac-address-entry", {}),
     "interface": ("show interfaces gigabitEthernet interface {port}", {"port": PORT_RES["fabric"]}),
@@ -27,6 +28,7 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "interface_errors": ("show interfaces gigabitEthernet error {port}", {"port": PORT_RES["fabric"]}),
 }
 MAX_OUTPUT = 20000
+MAX_LOG_OUTPUT = 200000  # logs keep the END of the output (newest entries), not the start
 
 
 class SshError(RuntimeError):
@@ -56,7 +58,7 @@ class SshClient:
         self.command_timeout = int(os.environ.get("SSH_COMMAND_TIMEOUT_SECONDS", "20"))
         self.sem = asyncio.Semaphore(int(os.environ.get("SSH_MAX_PARALLEL", "5")))
 
-    async def run(self, ip: str, key: str, **args: str) -> str:
+    async def run(self, ip: str, key: str, *, keep_tail: bool = False, **args: str) -> str:
         cmd = build_command(key, **args)
         user, pw = get_secret("SSH_USERNAME"), get_secret("SSH_PASSWORD")
         keyfile = os.environ.get("SSH_KEY_FILE")
@@ -77,4 +79,5 @@ class SshClient:
             raise SshError(f"ssh failed: {type(e).__name__}") from None
         if res.exit_status not in (0, None):
             raise SshError(f"command exited with status {res.exit_status}")
-        return str(res.stdout)[:MAX_OUTPUT]
+        out = str(res.stdout)
+        return out[-MAX_LOG_OUTPUT:] if keep_tail else out[:MAX_OUTPUT]

@@ -78,6 +78,14 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
             return await st.get_interface_detail(inv, ssh, switch, port)
 
         @mcp.tool()
+        @audit.tool("get_switch_logs", "ssh")
+        async def get_switch_logs(switch: str, lines: int = 100, severity: str | None = None,
+                                  contains: str | None = None) -> dict:
+            """Return the newest log entries from a Fabric Engine switch (lines 1-200). Optional severity
+            (INFO, WARNING, ERROR, FATAL: that level and worse) and contains (text filter)."""
+            return await st.get_switch_logs(inv, ssh, switch, lines, severity, contains)
+
+        @mcp.tool()
         @audit.tool("find_mac_address", "ssh")
         async def find_mac_address(switch: str, mac: str) -> dict:
             """Locate a MAC address in the switch forwarding table."""

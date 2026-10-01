@@ -6,17 +6,28 @@ from app.audit import Audit
 from app.main import build_server
 from app.validation import Inventory, Switch, ValidationError
 
-SSH_TOOLS = {"get_system_info", "get_fabric_adjacencies", "get_interface_detail", "find_mac_address"}
+SSH_TOOLS = {"get_system_info", "get_fabric_adjacencies", "get_interface_detail", "find_mac_address",
+             "get_switch_logs"}
 META = set(";|&$`<>\\\n\r()'\"!{}")
+
+
+LOG = """CP1 [09/30/26 10:00:01.000] 0x0 GlobalRouter SNMP INFO user login
+CP1 [09/30/26 10:05:00.000] 0x0 GlobalRouter LINK WARNING Port 1/12 link down
+CP1 [09/30/26 10:05:09.000] 0x0 GlobalRouter LINK INFO Port 1/12 link up
+CP1 [09/30/26 10:07:00.000] 0x0 GlobalRouter CPU ERROR high cpu 95%
+CP1 [09/30/26 10:08:00.000] 0x0 GlobalRouter SYS FATAL watchdog reset
+"""
 
 
 class FakeSsh(SshClient):
     def __init__(self):
         self.calls = []
 
-    async def run(self, ip, key, **args):
+    async def run(self, ip, key, *, keep_tail=False, **args):
         build_command(key, **args)  # same validation as the real client
         self.calls.append((ip, key, args))
+        if key == "log_tail":
+            return LOG
         if key == "mac_table":
             return ("VLAN  MAC                SRC\n"
                     "100   00:11:22:33:44:55  Port1/12\n"
@@ -67,10 +78,10 @@ async def test_ssh_tools_only_registered_when_enabled(inv, tmp_path):
     assert not SSH_TOOLS & {t.name for t in await off.list_tools()}
 
 
-async def test_ssh_catalogue_has_exactly_the_four_new_tools(server):
+async def test_ssh_catalogue_has_exactly_the_five_ssh_tools(server):
     mcp, _ = server
     names = {t.name for t in await mcp.list_tools()}
-    assert SSH_TOOLS <= names and len(names) == 10
+    assert SSH_TOOLS <= names and len(names) == 11
     assert not any("run" in n or "command" in n or "config" in n for n in names)
 
 
@@ -112,3 +123,47 @@ async def test_missing_known_hosts_refuses_to_connect(monkeypatch, tmp_path):
     monkeypatch.setenv("SSH_KNOWN_HOSTS", str(tmp_path / "missing"))
     with pytest.raises(SshError, match="known_hosts"):
         await SshClient().run("192.0.2.20", "sys_info")
+
+
+import json
+
+
+async def _logs(server, **args):
+    mcp, ssh = server
+    res = await mcp.call_tool("get_switch_logs", {"switch": "fab1", **args})
+    return json.loads(res[0].text), ssh
+
+
+async def test_logs_newest_lines_and_fixed_command_only(server):
+    out, ssh = await _logs(server, lines=2)
+    assert out["returned"] == 2 and "FATAL" in out["entries"][-1] and "ERROR" in out["entries"][0]
+    assert ssh.calls == [("192.0.2.20", "log_tail", {})]
+
+
+async def test_logs_severity_means_this_level_and_worse(server):
+    out, _ = await _logs(server, severity="warning")
+    assert [("WARNING" in e or "ERROR" in e or "FATAL" in e) for e in out["entries"]] == [True] * 3
+    out, _ = await _logs(server, severity="FATAL")
+    assert out["returned"] == 1
+
+
+async def test_logs_contains_filter_is_local(server):
+    out, ssh = await _logs(server, contains="port 1/12")
+    assert out["returned"] == 2
+    assert ssh.calls == [("192.0.2.20", "log_tail", {})]  # filter text never reaches the switch
+
+
+@pytest.mark.parametrize("bad", [{"lines": 0}, {"lines": 201}, {"severity": "DEBUG;x"}, {"contains": "a;reload"},
+                                 {"contains": "$(id)"}, {"contains": "x" * 65}])
+async def test_logs_bad_arguments_rejected_before_ssh(server, bad):
+    mcp, ssh = server
+    with pytest.raises(Exception):
+        await mcp.call_tool("get_switch_logs", {"switch": "fab1", **bad})
+    assert ssh.calls == []
+
+
+async def test_logs_rejected_for_exos(server):
+    mcp, ssh = server
+    with pytest.raises(Exception):
+        await mcp.call_tool("get_switch_logs", {"switch": "exos1"})
+    assert ssh.calls == []

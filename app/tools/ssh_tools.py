@@ -50,3 +50,33 @@ async def find_mac_address(inv: Inventory, ssh: SshClient, switch: str, mac: str
     table = await ssh.run(sw.management_ip, "mac_table")
     matches = [ln.strip() for ln in table.splitlines() if want in _norm_mac(ln)]
     return {"switch": sw.name, "mac": mac, "matches": matches[:MAX_MATCHES]}
+
+
+SEVERITIES = ("INFO", "WARNING", "ERROR", "FATAL")
+CONTAINS_RE = re.compile(r"[A-Za-z0-9 ._:/-]{1,64}")
+MAX_LINES = 200
+
+
+async def get_switch_logs(inv: Inventory, ssh: SshClient, switch: str, lines: int = 100,
+                          severity: str | None = None, contains: str | None = None) -> dict:
+    """Newest log lines from the switch's log file. Severity/text filters are applied here,
+    after the fixed `show logging file tail` command, so filter text never reaches the switch."""
+    sw = _fabric_ssh(inv, switch)
+    if not isinstance(lines, int) or isinstance(lines, bool) or not 1 <= lines <= MAX_LINES:
+        raise ValidationError(f"lines must be 1-{MAX_LINES}")
+    if severity is not None:
+        severity = str(severity).upper()
+        if severity not in SEVERITIES:
+            raise ValidationError("severity must be one of " + ", ".join(SEVERITIES))
+    if contains is not None and not CONTAINS_RE.fullmatch(contains):
+        raise ValidationError("contains: up to 64 letters, digits, space and . _ : / -")
+    raw = await ssh.run(sw.management_ip, "log_tail", keep_tail=True)
+    entries = [ln.rstrip() for ln in raw.splitlines() if ln.strip()]
+    if severity:
+        order = {n: i for i, n in enumerate(SEVERITIES)}  # this severity and worse
+        keep = {n for n in SEVERITIES if order[n] >= order[severity]}
+        entries = [ln for ln in entries if any(re.search(rf"(?<![A-Za-z]){n}(?![A-Za-z])", ln) for n in keep)]
+    if contains:
+        entries = [ln for ln in entries if contains.lower() in ln.lower()]
+    return {"switch": sw.name, "severity_filter": severity, "contains": contains,
+            "returned": len(entries[-lines:]), "entries": entries[-lines:]}
