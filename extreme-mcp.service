@@ -1,0 +1,29 @@
+[Unit]
+Description=Read-only Extreme Networks MCP Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=extreme-mcp
+Group=extreme-mcp
+WorkingDirectory=/opt/extreme-mcp
+EnvironmentFile=/etc/extreme-mcp/extreme-mcp.env
+ExecStart=/opt/extreme-mcp/venv/bin/python -m app.main
+Restart=on-failure
+RestartSec=10
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/log/extreme-mcp
+
+[Install]
+WantedBy=multi-user.target
