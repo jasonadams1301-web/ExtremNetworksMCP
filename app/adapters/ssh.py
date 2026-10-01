@@ -5,8 +5,10 @@ table is the entire attack surface: every entry must start with "show " and may 
 placeholders whose values match a strict regex. Host keys are verified against a pre-populated
 known_hosts file (no trust-on-first-use). Use a dedicated read-only account on the switches.
 
-NOTE: the exact show syntax below follows the Fabric Engine CLI as documented; confirm each
-command on real hardware (and that an exec channel works on your release) before relying on it.
+Fabric Engine does not run one-off commands over an SSH exec channel, so each call opens an
+interactive CLI session, waits for the prompt, sends the single fixed command, answers the
+--More-- pager (space to continue, q to stop) and closes. Only the command text and those two
+pager keys are ever sent. The session logs in fresh each time (the switch may authenticate via RADIUS).
 """
 import asyncio
 import os
@@ -28,7 +30,12 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "interface_errors": ("show interfaces gigabitEthernet error {port}", {"port": PORT_RES["fabric"]}),
 }
 MAX_OUTPUT = 20000
-MAX_LOG_OUTPUT = 200000  # logs keep the END of the output (newest entries), not the start
+MAX_PAGES = 40
+
+PROMPT_END = re.compile(r"(?:^|[\r\n])[^\s]+:\d+[>#] ?$")   # e.g. SWITCH-1:1>
+MORE = re.compile(r"--More--")
+MORE_TEXT = re.compile(r"--More--(?: \(q = quit\))? ?")
+ERASE = re.compile(r"(?:\x08 \x08)+|\x08")
 
 
 class SshError(RuntimeError):
@@ -51,6 +58,52 @@ def build_command(key: str, **args: str) -> str:
     return cmd
 
 
+def clean_output(raw: str, cmd: str) -> str:
+    """Strip the pager, backspace erasures, the echoed command and the trailing prompt."""
+    text = MORE_TEXT.sub("", raw)
+    text = ERASE.sub("", text).replace("\r\r\n", "\n").replace("\r\n", "\n").replace("\r", "")
+    lines = text.split("\n")
+    if lines and lines[0].strip() == cmd:
+        lines = lines[1:]
+    if lines and PROMPT_END.search("\n" + lines[-1]):
+        lines = lines[:-1]
+    return "\n".join(lines).strip("\n")
+
+
+async def _read(proc, deadline: float) -> str:
+    left = deadline - asyncio.get_running_loop().time()
+    if left <= 0:
+        raise SshError("timed out waiting for the switch")
+    try:
+        chunk = await asyncio.wait_for(proc.stdout.read(8192), left)
+    except asyncio.TimeoutError:
+        raise SshError("timed out waiting for the switch") from None
+    if not chunk:
+        raise SshError("switch closed the session")
+    return chunk
+
+
+async def drive_session(proc, cmd: str, want_lines: int | None, max_chars: int, timeout: float) -> str:
+    """Wait for the CLI prompt, send `cmd`, page through output, return cleaned text."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    buf = ""
+    while not PROMPT_END.search(buf):               # login banner, then the prompt
+        buf += await _read(proc, deadline)
+    proc.stdin.write(cmd + "\n")
+    buf, seen, pages = "", 0, 0
+    while True:
+        buf += await _read(proc, deadline)
+        if PROMPT_END.search(buf[seen:][-200:]):
+            return clean_output(buf, cmd)
+        m = MORE.search(buf, seen)
+        if m and buf[m.end():].strip(" \x08") in ("", "(q = quit)"):  # pager is waiting for a key
+            pages += 1
+            seen = len(buf)
+            enough = len(buf) >= max_chars or pages >= MAX_PAGES or (
+                want_lines is not None and clean_output(buf, cmd).count("\n") >= want_lines)
+            proc.stdin.write("q" if enough else " ")
+
+
 class SshClient:
     def __init__(self):
         self.known_hosts = os.environ.get("SSH_KNOWN_HOSTS", "/etc/extreme-mcp/known_hosts")
@@ -58,7 +111,8 @@ class SshClient:
         self.command_timeout = int(os.environ.get("SSH_COMMAND_TIMEOUT_SECONDS", "20"))
         self.sem = asyncio.Semaphore(int(os.environ.get("SSH_MAX_PARALLEL", "5")))
 
-    async def run(self, ip: str, key: str, *, keep_tail: bool = False, **args: str) -> str:
+    async def run(self, ip: str, key: str, *, want_lines: int | None = None,
+                  max_chars: int = MAX_OUTPUT, **args: str) -> str:
         cmd = build_command(key, **args)
         user, pw = get_secret("SSH_USERNAME"), get_secret("SSH_PASSWORD")
         keyfile = os.environ.get("SSH_KEY_FILE")
@@ -72,12 +126,11 @@ class SshClient:
                         ip, username=user, password=pw, client_keys=[keyfile] if keyfile else None,
                         known_hosts=self.known_hosts, agent_path=None,
                         connect_timeout=self.connect_timeout, login_timeout=self.connect_timeout) as conn:
-                    res = await conn.run(cmd, check=False, timeout=self.command_timeout)
+                    proc = await conn.create_process(term_type="vt100", term_size=(250, 50),
+                                                     encoding="utf-8", errors="replace")
+                    out = await drive_session(proc, cmd, want_lines, max_chars, self.command_timeout)
         except asyncssh.HostKeyNotVerifiable:
             raise SshError("host key verification failed") from None  # never auto-trust a changed key
         except (asyncssh.Error, OSError, asyncio.TimeoutError) as e:
             raise SshError(f"ssh failed: {type(e).__name__}") from None
-        if res.exit_status not in (0, None):
-            raise SshError(f"command exited with status {res.exit_status}")
-        out = str(res.stdout)
-        return out[-MAX_LOG_OUTPUT:] if keep_tail else out[:MAX_OUTPUT]
+        return out[:max_chars]

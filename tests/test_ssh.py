@@ -11,19 +11,25 @@ SSH_TOOLS = {"get_system_info", "get_fabric_adjacencies", "get_interface_detail"
 META = set(";|&$`<>\\\n\r()'\"!{}")
 
 
-LOG = """CP1 [09/30/26 10:00:01.000] 0x0 GlobalRouter SNMP INFO user login
-CP1 [09/30/26 10:05:00.000] 0x0 GlobalRouter LINK WARNING Port 1/12 link down
-CP1 [09/30/26 10:05:09.000] 0x0 GlobalRouter LINK INFO Port 1/12 link up
-CP1 [09/30/26 10:07:00.000] 0x0 GlobalRouter CPU ERROR high cpu 95%
-CP1 [09/30/26 10:08:00.000] 0x0 GlobalRouter SYS FATAL watchdog reset
-"""
+def _entry(ts, sev, msg):
+    return f"1 2026-10-01T{ts}-04:00 SW1 CP1 - 0x000d8602 - 00000000 Mgmt SSH {sev} {msg}"
+
+
+# the switch prints its log NEWEST FIRST, after an asterisk banner
+LOG_ENTRIES = [_entry("10:08:00.000", "FATAL", "watchdog reset"),
+               _entry("10:07:00.000", "ERROR", "high cpu 95%"),
+               _entry("10:05:09.000", "INFO", "Port 1/12 link up"),
+               _entry("10:05:00.000", "WARNING", "Port 1/12 link down"),
+               _entry("10:00:01.000", "INFO", "user login")]
+LOG = ("*" * 40 + "\n\t\tCommand Execution Time: Thu Oct 01 15:40:00 2026 EDT\n" + "*" * 40 + "\n"
+       + "\n".join(LOG_ENTRIES) + "\n")
 
 
 class FakeSsh(SshClient):
     def __init__(self):
         self.calls = []
 
-    async def run(self, ip, key, *, keep_tail=False, **args):
+    async def run(self, ip, key, *, want_lines=None, max_chars=20000, **args):
         build_command(key, **args)  # same validation as the real client
         self.calls.append((ip, key, args))
         if key == "log_tail":
@@ -134,15 +140,17 @@ async def _logs(server, **args):
     return json.loads(res[0].text), ssh
 
 
-async def test_logs_newest_lines_and_fixed_command_only(server):
+async def test_logs_newest_first_and_fixed_command_only(server):
     out, ssh = await _logs(server, lines=2)
-    assert out["returned"] == 2 and "FATAL" in out["entries"][-1] and "ERROR" in out["entries"][0]
+    assert out["order"] == "newest first" and out["returned"] == 2
+    assert "FATAL" in out["entries"][0] and "ERROR" in out["entries"][1]
     assert ssh.calls == [("192.0.2.20", "log_tail", {})]
+    assert all(e.startswith("1 2026-") for e in out["entries"])  # banner lines dropped
 
 
 async def test_logs_severity_means_this_level_and_worse(server):
     out, _ = await _logs(server, severity="warning")
-    assert [("WARNING" in e or "ERROR" in e or "FATAL" in e) for e in out["entries"]] == [True] * 3
+    assert len(out["entries"]) == 3 and "INFO" not in " ".join(out["entries"])
     out, _ = await _logs(server, severity="FATAL")
     assert out["returned"] == 1
 
