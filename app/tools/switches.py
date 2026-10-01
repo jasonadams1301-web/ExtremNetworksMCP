@@ -1,6 +1,8 @@
 """Phase 1 read-only tools. Each builds results from fixed OIDs; callers never supply OIDs or commands."""
-from app.adapters.snmp import SnmpClient
-from app.validation import Inventory, validate_port
+import re
+
+from app.adapters.snmp import SnmpClient, SnmpError
+from app.validation import Inventory, ValidationError, validate_port
 
 SYS = "1.3.6.1.2.1.1"
 IF = "1.3.6.1.2.1.2.2.1"       # ifTable columns
@@ -20,12 +22,96 @@ async def list_switches(inv: Inventory) -> list[dict]:
             for s in inv.all()]
 
 
+# Fabric Engine (Rapid City MIB) health OIDs
+RC = "1.3.6.1.4.1.2272.1"
+KHI_CPU = f"{RC}.85.10.1.1.2"      # rcKhiSlotCpuCurrentUtil.<slot>  (%)
+KHI_MEM = f"{RC}.85.10.1.1.8"      # rcKhiSlotMemUtil.<slot>         (%)
+TEMPS = f"{RC}.212"                # rcSingleCp temperatures, .1.0 = CPU, .2-.4 other sensors (deg C)
+PSU_STATUS = f"{RC}.4.8.1.1.2"     # rcChasPowerSupplyOperStatus.<psu>
+ENT_DESCR = "1.3.6.1.2.1.47.1.1.1.1.7"
+DHCP_FWD = f"{RC}.8.9.1"           # rcIpDhcpForwardTable (relay agent entries)
+PSU_STATES = {"1": "unknown", "2": "empty", "3": "up", "4": "down"}
+DHCP_MODES = {"1": "other", "2": "bootp", "3": "dhcp", "4": "bootp+dhcp"}
+
+
+async def _try(coro):
+    """Run one optional SNMP section; a missing/unsupported subtree must not fail the whole report."""
+    try:
+        return await coro
+    except (SnmpError, LookupError):
+        return None
+
+
+def _as_int(v: str):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _uptime(ticks: str) -> str:
+    t = _as_int(ticks)
+    if t is None:
+        return ticks
+    d, rem = divmod(t // 100, 86400)
+    h, rem = divmod(rem, 3600)
+    return f"{d}d {h}h {rem // 60}m"
+
+
 async def get_switch_health(inv: Inventory, snmp: SnmpClient, switch: str) -> dict:
     sw = inv.resolve(switch)
-    v = await snmp.get(sw.management_ip, [f"{SYS}.{i}.0" for i in (1, 3, 5, 6)])
+    ip = sw.management_ip
+    v = await snmp.get(ip, [f"{SYS}.{i}.0" for i in (1, 3, 5, 6)])
     descr, uptime, name, loc = (v[f"{SYS}.{i}.0"] for i in (1, 3, 5, 6))
-    return {"switch": sw.name, "sysName": name, "sysDescr": descr, "sysLocation": loc,
-            "uptime_ticks": uptime}
+    out = {"switch": sw.name, "sysName": name, "sysDescr": descr, "sysLocation": loc,
+           "uptime": _uptime(uptime), "uptime_ticks": uptime}
+    if sw.platform != "fabric":
+        out["note"] = "CPU, memory, temperature and power detail is only implemented for Fabric Engine"
+        return out
+
+    cpu = await _try(snmp.walk(ip, KHI_CPU))
+    mem = await _try(snmp.walk(ip, KHI_MEM))
+    temps = await _try(snmp.walk(ip, TEMPS, limit=10))
+    psu = await _try(snmp.walk(ip, PSU_STATUS))
+    ent = await _try(snmp.walk(ip, ENT_DESCR))
+
+    out["cpu_percent"] = None if cpu is None else {f"slot{i}": _as_int(x) for i, x in _col(cpu, KHI_CPU).items()}
+    out["memory_percent"] = None if mem is None else {f"slot{i}": _as_int(x) for i, x in _col(mem, KHI_MEM).items()}
+    if temps is not None:
+        t = {k[len(TEMPS) + 1:]: _as_int(x) for k, x in temps.items()}
+        out["temperature_c"] = {"cpu": t.get("1.0"), "other_sensors": [t[k] for k in ("2.0", "3.0", "4.0") if k in t]}
+    else:
+        out["temperature_c"] = None
+    if psu is not None:
+        out["power_supplies"] = {f"psu{i}": PSU_STATES.get(x, f"unknown({x})") for i, x in _col(psu, PSU_STATUS).items()}
+    else:
+        out["power_supplies"] = None
+    if ent is not None:
+        names = set(ent.values())
+        out["fan_trays_present"] = sorted(n for n in names if re.fullmatch(r"FanTray \d+", n, re.I))
+        out["fans_present"] = sorted(n for n in names if re.search(r"fan-\d+$", n, re.I))
+    out["notes"] = ["fan speed/status is not exposed over SNMP on this platform; fan_trays_present/fans_present list "
+                    "installed hardware only (use SSH get_system_info for fan status)"]
+    out["attention"] = [f"{k} is down" for k, st in (out.get("power_supplies") or {}).items() if st == "down"]
+    return out
+
+
+async def get_dhcp_status(inv: Inventory, snmp: SnmpClient, switch: str) -> dict:
+    """DHCP relay (forwarding) configuration. A relay whose server is the switch itself means a local DHCP server."""
+    sw = inv.resolve(switch)
+    if sw.platform != "fabric":
+        raise ValidationError("DHCP status is only implemented for Fabric Engine switches")
+    table = await snmp.walk(sw.management_ip, DHCP_FWD, limit=500)
+    cols = {c: _col(table, f"{DHCP_FWD}.{c}") for c in (1, 2, 3, 4)}
+    entries = [{"relay_interface_ip": cols[1].get(i), "server": cols[2].get(i),
+                "enabled": cols[3].get(i) == "1", "mode": DHCP_MODES.get(cols[4].get(i), cols[4].get(i))}
+               for i in sorted(cols[1])]
+    servers = sorted({e["server"] for e in entries if e["server"]})
+    local = sw.management_ip in servers
+    return {"switch": sw.name, "dhcp_relay_configured": bool(entries), "entries": entries,
+            "servers": servers, "local_dhcp_server_likely": local,
+            "note": "Derived from the DHCP forwarding table. A server equal to the switch's own address "
+                    "suggests a local DHCP server; confirm its leases/scopes over SSH."}
 
 
 async def _find_ifindex(snmp: SnmpClient, ip: str, port: str) -> str:

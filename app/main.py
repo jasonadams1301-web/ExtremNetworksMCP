@@ -31,7 +31,7 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
     @mcp.tool()
     @audit.tool("get_switch_health", "snmpv3")
     async def get_switch_health(switch: str) -> dict:
-        """Return name, description, location and uptime for an approved switch."""
+        """Return uptime plus CPU %, memory %, temperatures, power supply state and fan trays for a switch."""
         return await t.get_switch_health(inv, snmp, switch)
 
     @mcp.tool()
@@ -45,6 +45,12 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
     async def get_interface_errors(switch: str, port: str) -> dict:
         """Return discard and error counters for one port."""
         return await t.get_interface_errors(inv, snmp, switch, port)
+
+    @mcp.tool()
+    @audit.tool("get_dhcp_status", "snmpv3")
+    async def get_dhcp_status(switch: str) -> dict:
+        """Return the DHCP relay configuration (relay interfaces and servers) and whether the switch likely runs a local DHCP server."""
+        return await t.get_dhcp_status(inv, snmp, switch)
 
     @mcp.tool()
     @audit.tool("get_lldp_neighbors", "snmpv3")

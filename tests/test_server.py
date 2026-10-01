@@ -9,7 +9,7 @@ from app.main import build_server
 from app.validation import Inventory, Switch, ValidationError, validate_port
 
 APPROVED_TOOLS = {"list_switches", "get_switch_health", "get_interface",
-                  "get_interface_errors", "get_lldp_neighbors"}
+                  "get_interface_errors", "get_lldp_neighbors", "get_dhcp_status"}
 
 
 class FakeSnmp(SnmpClient):
@@ -20,8 +20,12 @@ class FakeSnmp(SnmpClient):
         self.calls.append(("get", ip, oids))
         return {o: "1" for o in oids}
 
+    tables: dict = {}
+
     async def walk(self, ip, oid, limit=500):
         self.calls.append(("walk", ip, oid))
+        if oid in self.tables:
+            return self.tables[oid]
         return {f"{oid}.1": "1/48"} if oid.startswith("1.3.6.1.2.1.31") else {}
 
 
@@ -139,3 +143,81 @@ def test_secrets_read_from_systemd_credentials_dir(monkeypatch, tmp_path):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
     assert str(SnmpClient()._user().userName) == "svc"
+
+
+RC = "1.3.6.1.4.1.2272.1"
+HEALTH_TABLES = {
+    f"{RC}.85.10.1.1.2": {f"{RC}.85.10.1.1.2.1": "5"},
+    f"{RC}.85.10.1.1.8": {f"{RC}.85.10.1.1.8.1": "53"},
+    f"{RC}.212": {f"{RC}.212.1.0": "33", f"{RC}.212.2.0": "32", f"{RC}.212.3.0": "32", f"{RC}.212.4.0": "34",
+                  f"{RC}.212.5.0": "0"},
+    f"{RC}.4.8.1.1.2": {f"{RC}.4.8.1.1.2.1": "3", f"{RC}.4.8.1.1.2.2": "2"},
+    "1.3.6.1.2.1.47.1.1.1.1.7": {"1.3.6.1.2.1.47.1.1.1.1.7.1": "5420M", "1.3.6.1.2.1.47.1.1.1.1.7.9": "FanTray Slot-1",
+                                  "1.3.6.1.2.1.47.1.1.1.1.7.82": "FanTray-1 Fan-1", "1.3.6.1.2.1.47.1.1.1.1.7.74": "FanTray 1"},
+}
+
+
+class HealthSnmp(FakeSnmp):
+    tables = HEALTH_TABLES
+
+    async def get(self, ip, oids):
+        base = "1.3.6.1.2.1.1"
+        return {f"{base}.1.0": "5420M (9.3.2.0)", f"{base}.3.0": "1029443700", f"{base}.5.0": "SW", f"{base}.6.0": ""}
+
+
+async def test_fabric_health_has_cpu_mem_temp_power_fans(inv, tmp_path):
+    mcp = build_server(inv, HealthSnmp(), Audit(None))
+    res = json.loads((await mcp.call_tool("get_switch_health", {"switch": "fabric1"}))[0].text)
+    assert res["cpu_percent"] == {"slot1": 5} and res["memory_percent"] == {"slot1": 53}
+    assert res["temperature_c"] == {"cpu": 33, "other_sensors": [32, 32, 34]}
+    assert res["power_supplies"] == {"psu1": "up", "psu2": "empty"}
+    assert res["fan_trays_present"] == ["FanTray 1"] and res["fans_present"] == ["FanTray-1 Fan-1"]
+    assert res["attention"] == []
+    assert res["uptime"] == "119d 3h 33m"
+
+
+async def test_down_power_supply_flagged(inv):
+    snmp = HealthSnmp()
+    snmp.tables = {**HEALTH_TABLES, f"{RC}.4.8.1.1.2": {f"{RC}.4.8.1.1.2.1": "3", f"{RC}.4.8.1.1.2.2": "4"}}
+    mcp = build_server(inv, snmp, Audit(None))
+    res = json.loads((await mcp.call_tool("get_switch_health", {"switch": "fabric1"}))[0].text)
+    assert res["attention"] == ["psu2 is down"]
+
+
+async def test_missing_vendor_sections_do_not_fail_health(inv):
+    class Partial(HealthSnmp):
+        async def walk(self, ip, oid, limit=500):
+            raise SnmpError("noSuchObject")
+    mcp = build_server(inv, Partial(), Audit(None))
+    res = json.loads((await mcp.call_tool("get_switch_health", {"switch": "fabric1"}))[0].text)
+    assert res["sysName"] == "SW" and res["cpu_percent"] is None and res["power_supplies"] is None
+
+
+async def test_exos_health_is_base_only(inv):
+    mcp = build_server(inv, HealthSnmp(), Audit(None))
+    res = json.loads((await mcp.call_tool("get_switch_health", {"switch": "sw1"}))[0].text)
+    assert "cpu_percent" not in res and "note" in res
+
+
+async def test_dhcp_status_relay_and_local_server_detection(inv):
+    f = f"{RC}.8.9.1"
+    snmp = FakeSnmp()
+    snmp.tables = {f: {
+        f"{f}.1.198.51.100.1.192.0.2.12": "198.51.100.1", f"{f}.2.198.51.100.1.192.0.2.12": "192.0.2.12",
+        f"{f}.3.198.51.100.1.192.0.2.12": "1", f"{f}.4.198.51.100.1.192.0.2.12": "3",
+        f"{f}.1.198.51.100.2.203.0.113.9": "198.51.100.2", f"{f}.2.198.51.100.2.203.0.113.9": "203.0.113.9",
+        f"{f}.3.198.51.100.2.203.0.113.9": "2", f"{f}.4.198.51.100.2.203.0.113.9": "4"}}
+    mcp = build_server(inv, snmp, Audit(None))
+    res = json.loads((await mcp.call_tool("get_dhcp_status", {"switch": "fabric1"}))[0].text)
+    assert res["dhcp_relay_configured"] and res["servers"] == ["192.0.2.12", "203.0.113.9"]
+    assert res["local_dhcp_server_likely"] is True  # 192.0.2.12 is fabric1's own address
+    by = {e["relay_interface_ip"]: e for e in res["entries"]}
+    assert by["198.51.100.1"]["enabled"] and by["198.51.100.1"]["mode"] == "dhcp"
+    assert not by["198.51.100.2"]["enabled"] and by["198.51.100.2"]["mode"] == "bootp+dhcp"
+
+
+async def test_dhcp_status_rejected_for_exos_and_unknown(inv):
+    mcp = build_server(inv, FakeSnmp(), Audit(None))
+    for sw in ("sw1", "203.0.113.1"):
+        with pytest.raises(Exception):
+            await mcp.call_tool("get_dhcp_status", {"switch": sw})

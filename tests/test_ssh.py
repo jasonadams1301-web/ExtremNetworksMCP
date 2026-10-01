@@ -70,7 +70,7 @@ async def test_ssh_tools_only_registered_when_enabled(inv, tmp_path):
 async def test_ssh_catalogue_has_exactly_the_four_new_tools(server):
     mcp, _ = server
     names = {t.name for t in await mcp.list_tools()}
-    assert SSH_TOOLS <= names and len(names) == 9
+    assert SSH_TOOLS <= names and len(names) == 10
     assert not any("run" in n or "command" in n or "config" in n for n in names)
 
 
