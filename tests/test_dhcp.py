@@ -182,7 +182,7 @@ async def test_log_hides_noise_and_is_newest_first(inv):
     out = await call(server(inv, FakeSsh()), "get_dhcp_server_log", switch="fab1")
     assert out["order"] == "newest first" and out["entries_in_log"] == 6 and out["returned"] == 3
     assert [e["event"] for e in out["entries"]] == ["DHCP4_LEASE_ALLOC_FAIL", "DHCP4_PACKET_DROP", "DHCP4_LEASE_ALLOC"]
-    assert out["oldest_entry_in_log"] == "2026-10-01 09:53:01"
+    assert out["oldest_entry_in_log"] == "2026-10-01 09:53:01" and out["newest_entry_in_log"] == "2026-10-01 09:57:00"
 
 
 async def test_log_filters(inv):
@@ -197,7 +197,7 @@ async def test_log_filters(inv):
 
 async def test_empty_log_is_not_a_parse_warning(inv):
     out = await call(server(inv, FakeSsh({"dhcp_log": LOG_EMPTY})), "get_dhcp_server_log", switch="fab1")
-    assert out["returned"] == 0 and out["oldest_entry_in_log"] is None and "parse_warnings" not in out
+    assert out["returned"] == 0 and out["oldest_entry_in_log"] is None and out["newest_entry_in_log"] is None and "parse_warnings" not in out
 
 
 @pytest.mark.parametrize("bad", [{"lines": 0}, {"lines": 201}, {"level": "TRACE"}, {"contains": "a|b"}])

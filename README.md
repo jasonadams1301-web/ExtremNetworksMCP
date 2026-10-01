@@ -22,6 +22,10 @@ It can look. It cannot change anything.
 | `get_lldp_neighbors` | SNMPv3 | all | LLDP neighbours and local-port mapping |
 | `get_dhcp_status` | SNMPv3 | Fabric Engine | DHCP relay interfaces and servers; flags a likely local DHCP server |
 | `get_switch_logs` | SSH | Fabric Engine | Newest log entries, optional severity (that level and worse) and text filter |
+| `get_dhcp_server` | SSH | Fabric Engine | Built-in DHCP server: enabled?, settings, subnets with lease utilization (flags 90%+), host reservations |
+| `get_dhcp_leases` | SSH | Fabric Engine | Leases (IP, MAC, last transaction, expiry), newest first; filter by subnet or IP/MAC fragment |
+| `get_dhcp_relay` | SSH | Fabric Engine | Relay interfaces with request/reply counters and configured servers; flags interfaces with requests but no replies |
+| `get_dhcp_server_log` | SSH | Fabric Engine | Newest DHCP server log entries; filter by level or text; routine polling hidden |
 | `get_system_info` | SSH | Fabric Engine | `show sys-info` output |
 | `get_fabric_adjacencies` | SSH | Fabric Engine | IS-IS (SPB) adjacencies |
 | `get_interface_detail` | SSH | Fabric Engine | Interface, statistics and error output for one port |
@@ -184,7 +188,7 @@ Other platforms and releases may differ, so check the SNMP OIDs and `show` comma
 
 - Fan speed and status are not exposed over SNMP on the tested platform. Only installed fan trays are listed.
 - Switch Engine (EXOS) has no SSH tools yet, and only basic fields from `get_switch_health`.
-- Detailed DHCP server state (scopes, leases) and stack health are not implemented.
+- Stack health is not implemented. The DHCP server log is a short rolling window and can lag the switch clock.
 - One shared SNMPv3 credential set and one shared SSH account for all switches.
 - Log search looks back about 1,000 lines when a severity or text filter is used.
 
