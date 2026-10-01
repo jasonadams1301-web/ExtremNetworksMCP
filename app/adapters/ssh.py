@@ -14,6 +14,7 @@ import re
 
 import asyncssh
 
+from app.secrets import get_secret
 from app.validation import PORT_RES, ValidationError
 
 # key -> (command template, {placeholder: validating regex})
@@ -57,7 +58,7 @@ class SshClient:
 
     async def run(self, ip: str, key: str, **args: str) -> str:
         cmd = build_command(key, **args)
-        user, pw = os.environ.get("SSH_USERNAME"), os.environ.get("SSH_PASSWORD")
+        user, pw = get_secret("SSH_USERNAME"), get_secret("SSH_PASSWORD")
         keyfile = os.environ.get("SSH_KEY_FILE")
         if not user or not (pw or keyfile):
             raise SshError("SSH credentials are not configured")

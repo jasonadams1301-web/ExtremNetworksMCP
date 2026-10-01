@@ -22,6 +22,10 @@ python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # Li
 ```
 
 ## Run
-Copy `inventory.example.yaml` to `inventory.yaml` and `extreme-mcp.env.example` to `extreme-mcp.env`,
-export `SNMP_USERNAME`, `SNMP_AUTH_PASSWORD`, `SNMP_PRIV_PASSWORD` (never commit them), then
-`INVENTORY_FILE=inventory.yaml python -m app.main`. Production install: `bash install.sh`.
+Local test: copy `inventory.example.yaml` to `inventory.yaml`, export `SNMP_USERNAME`, `SNMP_AUTH_PASSWORD`,
+`SNMP_PRIV_PASSWORD` (never commit them), then `INVENTORY_FILE=inventory.yaml python -m app.main`.
+
+Production (Ubuntu): `bash install.sh`, edit `/etc/extreme-mcp/inventory.yaml`, then store each secret with
+`bash set-secret.sh <name>`. Secrets are root-only files in `/etc/extreme-mcp/credentials/` that systemd
+passes to the service with `LoadCredential=` (the service reads them from `$CREDENTIALS_DIRECTORY`; OCE and
+the agent never see them). For SSH (Phase 2) uncomment the `ssh_*` `LoadCredential=` lines in the unit.

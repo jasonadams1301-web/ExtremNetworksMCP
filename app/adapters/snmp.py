@@ -1,6 +1,6 @@
 """SNMPv3 (authPriv) read-only adapter. Only GET and bulk-walk are implemented; there is no SET.
 
-Credentials come from the environment (SNMP_USERNAME, SNMP_AUTH_PASSWORD, SNMP_PRIV_PASSWORD) and never
+Credentials (SNMP_USERNAME, SNMP_AUTH_PASSWORD, SNMP_PRIV_PASSWORD) come from systemd credentials and never
 appear in results or logs. Every OID must fall under an approved prefix.
 """
 import os
@@ -11,6 +11,8 @@ from pysnmp.hlapi.v3arch.asyncio import (
     usmAesCfb128Protocol, usmAesCfb256Protocol,
     usmHMACSHAAuthProtocol, usmHMAC192SHA256AuthProtocol,
 )
+
+from app.secrets import get_secret
 
 # Approved read-only subtrees: SNMPv2-MIB system, IF-MIB, ENTITY-MIB/sensors, LLDP-MIB, Extreme enterprise.
 ALLOWED_PREFIXES = (
@@ -44,16 +46,14 @@ class SnmpClient:
         self.engine = SnmpEngine()
 
     def _user(self) -> UsmUserData:
-        try:
-            return UsmUserData(
-                os.environ["SNMP_USERNAME"],
-                authKey=os.environ["SNMP_AUTH_PASSWORD"],
-                privKey=os.environ["SNMP_PRIV_PASSWORD"],
-                authProtocol=AUTH[os.environ.get("SNMP_AUTH_PROTOCOL", "sha")],
-                privProtocol=PRIV[os.environ.get("SNMP_PRIV_PROTOCOL", "aes")],
-            )
-        except KeyError:
-            raise SnmpError("SNMPv3 credentials are not configured") from None
+        user, auth, priv = (get_secret(n) for n in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"))
+        if not (user and auth and priv):  # authPriv needs all three; never downgrade
+            raise SnmpError("SNMPv3 credentials are not configured")
+        return UsmUserData(
+            user, authKey=auth, privKey=priv,
+            authProtocol=AUTH[os.environ.get("SNMP_AUTH_PROTOCOL", "sha")],
+            privProtocol=PRIV[os.environ.get("SNMP_PRIV_PROTOCOL", "aes")],
+        )
 
     async def _target(self, ip: str):
         return await UdpTransportTarget.create((ip, 161), timeout=self.timeout, retries=self.retries)

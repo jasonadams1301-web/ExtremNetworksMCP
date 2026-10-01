@@ -130,3 +130,12 @@ def test_authpriv_user_builds_with_all_three(monkeypatch):
     for k in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"):
         monkeypatch.setenv(k, "value-for-test-12345")
     assert SnmpClient()._user().userName
+
+
+def test_secrets_read_from_systemd_credentials_dir(monkeypatch, tmp_path):
+    for n, v in (("snmp_username", "svc"), ("snmp_auth_password", "a" * 12), ("snmp_priv_password", "p" * 12)):
+        (tmp_path / n).write_text(v + "\n")
+    for k in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert str(SnmpClient()._user().userName) == "svc"
