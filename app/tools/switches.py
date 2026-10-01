@@ -29,7 +29,7 @@ async def get_switch_health(inv: Inventory, snmp: SnmpClient, switch: str) -> di
 
 
 async def _find_ifindex(snmp: SnmpClient, ip: str, port: str) -> str:
-    """EXOS ifName is the port label (e.g. '1:48'), so match on ifName."""
+    """ifName is the port label (EXOS '1:48', Fabric Engine '1/1'; verify on hardware), so match on ifName."""
     names = await snmp.walk(ip, f"{IFX}.1")
     for idx, nm in _col(names, f"{IFX}.1").items():
         if nm == port:
@@ -39,7 +39,7 @@ async def _find_ifindex(snmp: SnmpClient, ip: str, port: str) -> str:
 
 async def get_interface(inv: Inventory, snmp: SnmpClient, switch: str, port: str) -> dict:
     sw = inv.resolve(switch)
-    port = validate_port(port)
+    port = validate_port(port, sw.platform)
     i = await _find_ifindex(snmp, sw.management_ip, port)
     oids = [f"{IF}.{c}.{i}" for c in (2, 7, 8)] + [f"{IFX}.{c}.{i}" for c in (15, 6, 10, 18)]
     v = await snmp.get(sw.management_ip, oids)
@@ -51,7 +51,7 @@ async def get_interface(inv: Inventory, snmp: SnmpClient, switch: str, port: str
 
 async def get_interface_errors(inv: Inventory, snmp: SnmpClient, switch: str, port: str) -> dict:
     sw = inv.resolve(switch)
-    port = validate_port(port)
+    port = validate_port(port, sw.platform)
     i = await _find_ifindex(snmp, sw.management_ip, port)
     v = await snmp.get(sw.management_ip, [f"{IF}.{c}.{i}" for c in (13, 14, 19, 20)])
     return {"switch": sw.name, "port": port, "in_discards": v[f"{IF}.13.{i}"],

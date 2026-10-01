@@ -22,12 +22,13 @@ class FakeSnmp(SnmpClient):
 
     async def walk(self, ip, oid, limit=500):
         self.calls.append(("walk", ip, oid))
-        return {f"{oid}.1": "1:48"} if oid.startswith("1.3.6.1.2.1.31") else {}
+        return {f"{oid}.1": "1/48"} if oid.startswith("1.3.6.1.2.1.31") else {}
 
 
 @pytest.fixture
 def inv():
     return Inventory([Switch("sw1", "192.0.2.10", "exos", "Test", ("snmpv3",)),
+                      Switch("fabric1", "192.0.2.12", "fabric", "Test", ("snmpv3",)),
                       Switch("nosnmp", "192.0.2.11", "exos", "Test", ("ssh",))])
 
 
@@ -55,15 +56,29 @@ def test_protocol_not_enabled_rejected(inv):
         inv.resolve("nosnmp", "snmpv3")
 
 
-@pytest.mark.parametrize("bad", ["1:48; reboot", "$(id)", "1:48 && x", "", "a", "1:2:3", "1" * 5])
-def test_bad_ports_rejected(bad):
+@pytest.mark.parametrize("platform,bad", [
+    ("fabric", "1/1; reboot"), ("fabric", "$(id)"), ("fabric", "1:48"), ("fabric", "48"),
+    ("fabric", "1/1/1/1"), ("fabric", ""), ("exos", "1/1"), ("exos", "1:48; reboot"),
+    ("exos", "1:2:3"), ("exos", "a"), ("unknown", "1/1")])
+def test_bad_ports_rejected(platform, bad):
     with pytest.raises(ValidationError):
-        validate_port(bad)
+        validate_port(bad, platform)
 
 
-@pytest.mark.parametrize("good", ["48", "1:48"])
-def test_good_ports(good):
-    assert validate_port(good) == good
+@pytest.mark.parametrize("platform,good", [
+    ("fabric", "1/1"), ("fabric", "1/12/1"), ("exos", "48"), ("exos", "1:48")])
+def test_good_ports(platform, good):
+    assert validate_port(good, platform) == good
+
+
+async def test_fabric_port_flows_through_tool(server):
+    mcp, snmp, _ = server
+    await mcp.call_tool("get_interface_errors", {"switch": "fabric1", "port": "1/48"})
+    assert snmp.calls[0] == ("walk", "192.0.2.12", "1.3.6.1.2.1.31.1.1.1.1")
+
+
+def test_fabric_enterprise_oids_allowed():
+    assert check_oid("1.3.6.1.4.1.2272.1.4.10")
 
 
 def test_oid_outside_view_rejected():

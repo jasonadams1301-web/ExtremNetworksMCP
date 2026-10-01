@@ -2,7 +2,7 @@
 switches:
   - name: school-switch-01
     management_ip: 192.0.2.10   # placeholder (TEST-NET-1)
-    platform: exos
+    platform: fabric   # fabric (Fabric Engine/VOSS) or exos (Switch Engine)
     site: Example School
     mcp_enabled: true
     protocols:

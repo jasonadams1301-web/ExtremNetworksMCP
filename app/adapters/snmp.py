@@ -19,7 +19,8 @@ ALLOWED_PREFIXES = (
     "1.3.6.1.2.1.31.1.1.",  # ifXTable
     "1.3.6.1.2.1.47.",      # ENTITY-MIB
     "1.0.8802.1.1.2.",      # LLDP-MIB
-    "1.3.6.1.4.1.1916.",    # Extreme enterprise
+    "1.3.6.1.4.1.1916.",    # Extreme enterprise (Switch Engine / EXOS)
+    "1.3.6.1.4.1.2272.",    # Rapid City enterprise (Fabric Engine / VOSS)
 )
 AUTH = {"sha": usmHMACSHAAuthProtocol, "sha256": usmHMAC192SHA256AuthProtocol}
 PRIV = {"aes": usmAesCfb128Protocol, "aes256": usmAesCfb256Protocol}

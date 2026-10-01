@@ -35,7 +35,7 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit) -> FastMCP:
     @mcp.tool()
     @audit.tool("get_interface", "snmpv3")
     async def get_interface(switch: str, port: str) -> dict:
-        """Return state, speed and counters for one port (e.g. '1:48')."""
+        """Return state, speed and counters for one port (Fabric Engine e.g. '1/1'; Switch Engine e.g. '1:48')."""
         return await t.get_interface(inv, snmp, switch, port)
 
     @mcp.tool()

@@ -4,7 +4,13 @@ from dataclasses import dataclass
 
 import yaml
 
-PORT_RE = re.compile(r"[0-9]{1,3}(:[0-9]{1,3})?")  # EXOS port: 48 or 1:48
+# Port label formats per platform: Fabric Engine 1/1 or 1/1/1 (channelized); Switch Engine (EXOS) 48 or 1:48
+PORT_RES = {
+    "fabric": re.compile(r"[0-9]{1,3}/[0-9]{1,3}(/[0-9]{1,2})?"),
+    "exos": re.compile(r"[0-9]{1,3}(:[0-9]{1,3})?"),
+}
+PLATFORM_ALIASES = {"fabric": "fabric", "fabric-engine": "fabric", "voss": "fabric",
+                    "exos": "exos", "switch-engine": "exos"}
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
@@ -33,7 +39,7 @@ class Inventory:
             Switch(
                 name=str(e["name"]),
                 management_ip=str(e["management_ip"]),
-                platform=str(e.get("platform", "exos")),
+                platform=PLATFORM_ALIASES[str(e.get("platform", "fabric")).lower()],
                 site=str(e.get("site", "")),
                 protocols=tuple(e.get("protocols", [])),
             )
@@ -57,7 +63,9 @@ class Inventory:
         return sw
 
 
-def validate_port(port: str) -> str:
-    if not isinstance(port, str) or not PORT_RE.fullmatch(port):
-        raise ValidationError("invalid port; expected e.g. 48 or 1:48")
+def validate_port(port: str, platform: str = "fabric") -> str:
+    rx = PORT_RES.get(platform)
+    if rx is None or not isinstance(port, str) or not rx.fullmatch(port):
+        example = "1/1 or 1/1/1" if platform == "fabric" else "48 or 1:48"
+        raise ValidationError(f"invalid port; expected e.g. {example}")
     return port
