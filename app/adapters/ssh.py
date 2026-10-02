@@ -36,6 +36,8 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "dhcp_log": ("show ip dhcp-server log", {}),
     "dhcp_relay_counters": ("show ip dhcp-relay counters", {}),
     "dhcp_relay_fwd": ("show ip dhcp-relay fwd-path", {}),
+    "arp": ("show ip arp", {}),
+    "arp_vrf": ("show ip arp vrf {vrf}", {"vrf": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,15}")}),
 }
 MAX_OUTPUT = 20000
 MAX_PAGES = 40

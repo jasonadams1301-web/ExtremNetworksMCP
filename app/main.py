@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from app.adapters.snmp import SnmpClient
 from app.adapters.ssh import SshClient
 from app.audit import Audit
+from app.tools import arp as ar
 from app.tools import dhcp as dh
 from app.tools import ssh_tools as st
 from app.tools import switches as t
@@ -142,6 +143,17 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
             """Return the newest DHCP server log entries (lines 1-200). Optional level (INFO, WARN, ERROR,
             FATAL: that level and worse) and contains filter; routine polling is hidden unless include_noise."""
             return await dh.get_dhcp_server_log(inv, ssh, switch, lines, level, contains, include_noise)
+
+        @mcp.tool()
+        @audit.tool("get_arp_table", "ssh")
+        @tagged
+        async def get_arp_table(switch: str, contains: str | None = None, subnet: str | None = None,
+                                vlan: int | None = None, port: str | None = None, entry_type: str | None = None,
+                                vrf: str | None = None, limit: int = 100) -> dict:
+            """Return the switch's ARP table (IP, MAC, VLAN, port, type, TTL), sorted by IP. Optional filters:
+            contains (IP or MAC fragment), subnet (e.g. 192.0.2.0/24), vlan (1-4094), port (e.g. 1/48),
+            entry_type (DYNAMIC or LOCAL), vrf (name; default is the GlobalRouter), limit 1-200."""
+            return await ar.get_arp_table(inv, ssh, switch, contains, subnet, vlan, port, entry_type, vrf, limit)
 
         @mcp.tool()
         @audit.tool("find_mac_address", "ssh")

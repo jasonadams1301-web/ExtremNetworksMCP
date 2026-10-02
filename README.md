@@ -29,6 +29,7 @@ It can look. It cannot change anything.
 | `get_system_info` | SSH | Fabric Engine | `show sys-info` output |
 | `get_fabric_adjacencies` | SSH | Fabric Engine | IS-IS (SPB) adjacencies |
 | `get_interface_detail` | SSH | Fabric Engine | Interface, statistics and error output for one port |
+| `get_arp_table` | SSH | Fabric Engine | ARP table (IP, MAC, VLAN, port, type, TTL); filter by IP/MAC fragment, subnet, VLAN, port, type or VRF |
 | `find_mac_address` | SSH | Fabric Engine | Where a MAC address is in the forwarding table |
 
 The SSH tools are only registered when `SSH_ENABLED=true`.
