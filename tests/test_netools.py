@@ -499,3 +499,28 @@ def test_route_with_a_next_hop_name_wider_than_its_column():
     assert not bad and len(routes) == 2
     assert routes[0]["next_hop"] == "Some-Really-Long-Core-Switch-Name" and routes[0]["interface"] == "4051"
     assert routes[0]["protocol"] == "ISIS" and routes[0]["flags"] == "IBS" and routes[0]["preference"] == 7
+
+
+# ---------------- IS-IS layout without the area columns (older software release) ----------------
+SYSID_NOAREA = BANNER + rule("ISIS System-Id") + "SYSTEM-ID\n" + DASH + "0049.0248.0109\n"
+ISIS_IF_OLD = BANNER + rule("ISIS Interfaces") + (
+    "IFIDX             TYPE    LEVEL     OP-STATE  ADM-STATE  ADJ    UP-ADJ  SPBM-L1-METRIC   OP-SPBM-L1-METRIC   ORIGIN    \n") + DASH + (
+    "Port1/1           pt-pt   Level 1   DOWN      DOWN       0      0       10               10                  CONFIG    \n"
+    "Port1/49          pt-pt   Level 1   UP        UP         1      1       10               10                  CONFIG    \n"
+    "Port1/50          pt-pt   Level 1   UP        UP         1      1       10               10                  CONFIG    \n") + DASH + \
+    " 3 out of 3 Total Num of ISIS interfaces \n" + DASH
+
+
+def test_isis_system_id_and_interfaces_without_area_columns():
+    assert parse_system_id(SYSID_NOAREA) == {"system_id": "0049.0248.0109", "area": None}
+    ifs, bad = parse_isis_interfaces(ISIS_IF_OLD)
+    assert not bad and [i["interface"] for i in ifs] == ["Port1/1", "Port1/49", "Port1/50"]
+    assert ifs[1]["oper"] == "UP" and ifs[1]["adjacencies"] == 1 and ifs[1]["metric"] == 10 and ifs[1]["origin"] == "CONFIG"
+    assert ifs[0]["admin"] == "DOWN" and ifs[0]["oper"] == "DOWN"
+
+
+async def test_get_fabric_status_on_the_older_layout(inv):
+    ssh = FakeSsh({"isis_system_id": SYSID_NOAREA, "isis_interface": ISIS_IF_OLD, "isis_adjacencies": ADJ_ONE})
+    out = await call(server(inv, ssh), "get_fabric_status", switch="fab1")
+    assert out["isis_system"]["system_id"] == "0049.0248.0109" and out["isis_interfaces_total"] == 3
+    assert out["isis_interfaces_oper_down"] == 0 and "parse_warnings" not in out
