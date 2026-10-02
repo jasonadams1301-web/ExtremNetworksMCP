@@ -221,3 +221,86 @@ async def test_dhcp_status_rejected_for_exos_and_unknown(inv):
     for sw in ("sw1", "203.0.113.1"):
         with pytest.raises(Exception):
             await mcp.call_tool("get_dhcp_status", {"switch": sw})
+
+
+# ---------------- per-switch noAuthNoPriv opt-in (never an automatic fallback) ----------------
+from app.validation import Inventory as _Inv                                  # noqa: E402
+
+
+def _write_inventory(tmp_path, extra=""):
+    p = tmp_path / "inv.yaml"
+    p.write_text(
+        "switches:\n"
+        "  - {name: modern, management_ip: 192.0.2.30, platform: fabric, mcp_enabled: true, protocols: [snmpv3]}\n"
+        f"  - {{name: legacy, management_ip: 192.0.2.31, platform: fabric, mcp_enabled: true, protocols: [snmpv3], "
+        f"snmp_security: noauth{extra}}}\n", encoding="utf-8")
+    return str(p)
+
+
+def test_inventory_defaults_to_authpriv_and_lists_only_opted_in_switches(tmp_path):
+    inv = _Inv.load(_write_inventory(tmp_path))
+    assert inv.resolve("modern").snmp_security == "authpriv" and inv.resolve("legacy").snmp_security == "noauth"
+    assert inv.noauth_ips() == {"192.0.2.31"}
+
+
+@pytest.mark.parametrize("value,ok", [("noauth", True), ("no-auth", True), ("noAuthNoPriv", True), ("authPriv", True),
+                                      ("auth_priv", True), ("none", False), ("authnopriv", False), ("v2c", False)])
+def test_snmp_security_values_are_validated_at_load(tmp_path, value, ok):
+    p = tmp_path / "i.yaml"
+    p.write_text(f"switches:\n  - {{name: s1, management_ip: 192.0.2.40, mcp_enabled: true, protocols: [snmpv3], "
+                 f"snmp_security: {value}}}\n", encoding="utf-8")
+    if ok:
+        assert _Inv.load(str(p)).all()
+    else:
+        with pytest.raises(ValueError, match="snmp_security"):
+            _Inv.load(str(p))
+
+
+def _creds(monkeypatch, noauth="monitor"):
+    for k in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"):
+        monkeypatch.setenv(k, "value-for-test-12345")
+    if noauth:
+        monkeypatch.setenv("SNMP_NOAUTH_USERNAME", noauth)
+    else:
+        monkeypatch.delenv("SNMP_NOAUTH_USERNAME", raising=False)
+
+
+def test_opted_in_switch_uses_noauth_user_and_others_keep_authpriv(monkeypatch):
+    _creds(monkeypatch)
+    c = SnmpClient(noauth_hosts={"192.0.2.31"})
+    legacy, modern = c._user("192.0.2.31"), c._user("192.0.2.30")
+    assert str(legacy.userName) == "monitor" and legacy.security_level == "noAuthNoPriv"
+    assert str(modern.userName) == "value-for-test-12345" and modern.security_level == "authPriv"
+
+
+def test_switch_not_opted_in_never_gets_noauth_even_when_the_credential_exists(monkeypatch):
+    _creds(monkeypatch)
+    for k in ("SNMP_AUTH_PASSWORD",):                       # authPriv credentials incomplete -> error, no downgrade
+        monkeypatch.delenv(k)
+    with pytest.raises(SnmpError, match="not configured"):
+        SnmpClient(noauth_hosts={"192.0.2.31"})._user("192.0.2.30")
+    with pytest.raises(SnmpError, match="not configured"):
+        SnmpClient()._user("192.0.2.30")
+
+
+def test_noauth_switch_without_a_configured_username_is_an_error(monkeypatch):
+    _creds(monkeypatch, noauth=None)
+    with pytest.raises(SnmpError, match="noAuthNoPriv username is not configured"):
+        SnmpClient(noauth_hosts={"192.0.2.31"})._user("192.0.2.31")
+
+
+async def test_noauth_switch_is_marked_in_list_and_health(tmp_path, monkeypatch):
+    inv = _Inv.load(_write_inventory(tmp_path))
+
+    class S(FakeSnmp):
+        async def get(self, ip, oids):
+            return {o: "x" for o in oids}
+
+    mcp = build_server(inv, S(), Audit(None))
+    res = await mcp.call_tool("list_switches", {})
+    contents = res[0] if isinstance(res, tuple) else res
+    rows = {json.loads(c.text)["name"]: json.loads(c.text) for c in contents}
+    assert rows["legacy"]["snmp_security"] == "noauth" and rows["modern"]["snmp_security"] == "authpriv"
+    health = json.loads((await mcp.call_tool("get_switch_health", {"switch": "legacy"}))[0].text)
+    assert health["snmp_security"] == "noauth" and "unauthenticated" in health["security_note"]
+    assert "security_note" not in json.loads((await mcp.call_tool("get_switch_health", {"switch": "modern"}))[0].text)

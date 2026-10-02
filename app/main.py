@@ -210,7 +210,7 @@ def main() -> None:
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
     inv = Inventory.load(os.environ.get("INVENTORY_FILE", "/etc/extreme-mcp/inventory.yaml"))
     ssh = SshClient() if os.environ.get("SSH_ENABLED", "false").lower() == "true" else None
-    build_server(inv, SnmpClient(), Audit(os.environ.get("AUDIT_LOG")), ssh).run(transport="streamable-http")
+    build_server(inv, SnmpClient(noauth_hosts=inv.noauth_ips()), Audit(os.environ.get("AUDIT_LOG")), ssh).run(transport="streamable-http")
 
 
 if __name__ == "__main__":

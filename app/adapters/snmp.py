@@ -40,12 +40,20 @@ def check_oid(oid: str) -> str:
 
 
 class SnmpClient:
-    def __init__(self):
+    def __init__(self, noauth_hosts=None):
+        self.noauth_hosts = frozenset(noauth_hosts or ())       # IPs explicitly opted in to noAuthNoPriv
         self.timeout = int(os.environ.get("SNMP_TIMEOUT_SECONDS", "5"))
         self.retries = int(os.environ.get("SNMP_RETRIES", "1"))
         self.engine = SnmpEngine()
 
-    def _user(self) -> UsmUserData:
+    def _user(self, ip: str | None = None) -> UsmUserData:
+        if ip is not None and ip in self.noauth_hosts:
+            # noAuthNoPriv: no authentication or encryption. Only for switches the inventory explicitly marks
+            # snmp_security: noauth; a failed authPriv query never falls back to this.
+            user = get_secret("SNMP_NOAUTH_USERNAME")
+            if not user:
+                raise SnmpError("SNMPv3 noAuthNoPriv username is not configured")
+            return UsmUserData(user)
         user, auth, priv = (get_secret(n) for n in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"))
         if not (user and auth and priv):  # authPriv needs all three; never downgrade
             raise SnmpError("SNMPv3 credentials are not configured")
@@ -62,7 +70,7 @@ class SnmpClient:
         for o in oids:
             check_oid(o)
         err, status, _idx, binds = await get_cmd(
-            self.engine, self._user(), await self._target(ip), ContextData(),
+            self.engine, self._user(ip), await self._target(ip), ContextData(),
             *[ObjectType(ObjectIdentity(o)) for o in oids])
         if err or status:
             raise SnmpError(str(err or status.prettyPrint()))
@@ -72,7 +80,7 @@ class SnmpClient:
         check_oid(oid)
         out: dict[str, str] = {}
         async for err, status, _idx, binds in bulk_walk_cmd(
-                self.engine, self._user(), await self._target(ip), ContextData(),
+                self.engine, self._user(ip), await self._target(ip), ContextData(),
                 0, 25, ObjectType(ObjectIdentity(oid)), lexicographicMode=False):
             if err or status:
                 raise SnmpError(str(err or status.prettyPrint()))

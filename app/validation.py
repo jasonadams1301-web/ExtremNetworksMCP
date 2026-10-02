@@ -25,6 +25,17 @@ class Switch:
     platform: str
     site: str
     protocols: tuple[str, ...]
+    snmp_security: str = "authpriv"      # "authpriv" (default) or "noauth" (explicit per-switch opt-in)
+
+
+SNMP_SECURITY = {"authpriv": "authpriv", "noauth": "noauth", "noauthnopriv": "noauth"}
+
+
+def _snmp_security(raw, name: str) -> str:
+    key = str(raw if raw is not None else "authpriv").lower().replace("-", "").replace("_", "").replace(" ", "")
+    if key not in SNMP_SECURITY:
+        raise ValueError(f"switch {name}: snmp_security must be 'authpriv' or 'noauth', not {raw!r}")
+    return SNMP_SECURITY[key]
 
 
 class Inventory:
@@ -42,6 +53,7 @@ class Inventory:
                 platform=PLATFORM_ALIASES[str(e.get("platform", "fabric")).lower()],
                 site=str(e.get("site", "")),
                 protocols=tuple(e.get("protocols", [])),
+                snmp_security=_snmp_security(e.get("snmp_security"), str(e["name"])),
             )
             for e in data.get("switches", [])
             if e.get("mcp_enabled") is True
@@ -51,6 +63,10 @@ class Inventory:
     def ip_of(self, name: str) -> str | None:
         sw = self._by_name.get(name.lower()) if isinstance(name, str) else None
         return sw.management_ip if sw else None
+
+    def noauth_ips(self) -> set[str]:
+        """Management IPs explicitly marked snmp_security: noauth. Nothing else is ever queried without authPriv."""
+        return {s.management_ip for s in self._by_name.values() if s.snmp_security == "noauth"}
 
     def all(self) -> list[Switch]:
         return sorted(self._by_name.values(), key=lambda s: s.name)

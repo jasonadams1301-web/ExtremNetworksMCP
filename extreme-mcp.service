@@ -13,6 +13,8 @@ EnvironmentFile=/etc/extreme-mcp/extreme-mcp.env
 LoadCredential=snmp_username:/etc/extreme-mcp/credentials/snmp_username
 LoadCredential=snmp_auth_password:/etc/extreme-mcp/credentials/snmp_auth_password
 LoadCredential=snmp_priv_password:/etc/extreme-mcp/credentials/snmp_priv_password
+# Only if some switches are marked snmp_security: noauth in the inventory: create this file, then uncomment.
+#LoadCredential=snmp_noauth_username:/etc/extreme-mcp/credentials/snmp_noauth_username
 # Phase 2 (SSH): uncomment and create these files.
 #LoadCredential=ssh_username:/etc/extreme-mcp/credentials/ssh_username
 #LoadCredential=ssh_password:/etc/extreme-mcp/credentials/ssh_password

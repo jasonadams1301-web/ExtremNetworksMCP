@@ -19,7 +19,7 @@ def _col(table: dict[str, str], base: str) -> dict[str, str]:
 
 async def list_switches(inv: Inventory) -> list[dict]:
     return [{"name": s.name, "management_ip": s.management_ip, "site": s.site, "platform": s.platform,
-             "protocols": list(s.protocols)}
+             "protocols": list(s.protocols), "snmp_security": s.snmp_security}
             for s in inv.all()]
 
 
@@ -66,6 +66,10 @@ async def get_switch_health(inv: Inventory, snmp: SnmpClient, switch: str) -> di
     descr, uptime, name, loc = (v[f"{SYS}.{i}.0"] for i in (1, 3, 5, 6))
     out = {"switch": sw.name, "sysName": name, "sysDescr": descr, "sysLocation": loc,
            "uptime": _uptime(uptime), "uptime_ticks": uptime}
+    if sw.snmp_security == "noauth":
+        out["snmp_security"] = "noauth"
+        out["security_note"] = ("this switch is queried with SNMPv3 noAuthNoPriv (no authentication or encryption); "
+                                "treat its SNMP data as unauthenticated")
     if sw.platform != "fabric":
         out["note"] = "CPU, memory, temperature and power detail is only implemented for Fabric Engine"
         return out

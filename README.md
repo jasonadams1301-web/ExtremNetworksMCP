@@ -171,8 +171,30 @@ Settings (`/etc/extreme-mcp/extreme-mcp.env`, see `extreme-mcp.env.example`):
 | `SSH_MAX_PARALLEL` | `5` | Concurrent SSH sessions |
 
 Secrets are **not** in this file. They are systemd credentials named `snmp_username`, `snmp_auth_password`,
-`snmp_priv_password`, `ssh_username`, `ssh_password`. For local testing only, the upper-case names
+`snmp_priv_password`, `snmp_noauth_username` (only for noauth switches), `ssh_username`, `ssh_password`. For local testing only, the upper-case names
 (`SNMP_USERNAME`, ...) are read from the environment.
+
+## Switches that only support SNMPv3 without authentication
+
+Every switch is queried with SNMPv3 **authPriv** by default. For a switch that has no authPriv user (only an SNMPv3
+no-auth user), mark it explicitly in the inventory:
+
+```yaml
+  - name: older-switch-01
+    management_ip: 192.0.2.50
+    platform: fabric
+    mcp_enabled: true
+    protocols: [snmpv3]
+    snmp_security: noauth        # noAuthNoPriv; the default is authpriv
+```
+
+and store the no-auth username: `bash set-secret.sh snmp_noauth_username`, then uncomment the
+`LoadCredential=snmp_noauth_username:...` line in the systemd unit and restart.
+
+This is a **per-switch opt-in, never an automatic fallback**: a switch left as authPriv that fails authentication is
+reported as an error and is never retried without authentication. noAuthNoPriv sends the username in clear text and the
+replies cannot be verified, so use it only for read-only users whose view is limited, and treat the data as
+unauthenticated (`list_switches` and `get_switch_health` show `snmp_security` for these switches).
 
 ## Adding a switch
 
