@@ -223,10 +223,8 @@ async def test_dhcp_tools_reject_exos_unknown_and_unregistered_without_ssh(inv, 
 # ---- the switch's own address is always stated, so the agent does not confuse it with the OCE host ----
 async def test_list_switches_includes_management_ip(inv):
     mcp = server(inv, FakeSsh())
-    res = await mcp.call_tool("list_switches", {})
-    contents = res[0] if isinstance(res, tuple) else res        # list results arrive as one item per switch
-    rows = [json.loads(c.text) for c in contents]
-    assert {r["name"]: r["management_ip"] for r in rows} == {"fab1": "192.0.2.20", "exos1": "192.0.2.21"}
+    out = json.loads((await mcp.call_tool("list_switches", {})).__getitem__(0).text)
+    assert {r["name"]: r["management_ip"] for r in out["switches"]} == {"fab1": "192.0.2.20", "exos1": "192.0.2.21"}
 
 
 @pytest.mark.parametrize("tool,args", [

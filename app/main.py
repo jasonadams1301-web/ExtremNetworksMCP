@@ -44,9 +44,11 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
 
     @mcp.tool()
     @audit.tool("list_switches", "inventory")
-    async def list_switches() -> list[dict]:
-        """List the approved managed switches."""
-        return await t.list_switches(inv)
+    async def list_switches(name_contains: str | None = None, site: str | None = None, platform: str | None = None,
+                            limit: int = 50) -> dict:
+        """List approved switches (name, management_ip, site, model, platform, snmp_security). Filter with name_contains,
+        site or platform (fabric, exos, ers, other); limit up to 200. With no filter it also returns the site list."""
+        return await t.list_switches(inv, name_contains, site, platform, limit)
 
     @mcp.tool()
     @audit.tool("get_switch_health", "snmpv3")

@@ -17,10 +17,40 @@ def _col(table: dict[str, str], base: str) -> dict[str, str]:
     return {k[len(p):]: v for k, v in table.items() if k.startswith(p)}
 
 
-async def list_switches(inv: Inventory) -> list[dict]:
-    return [{"name": s.name, "management_ip": s.management_ip, "site": s.site, "platform": s.platform,
-             "protocols": list(s.protocols), "snmp_security": s.snmp_security}
-            for s in inv.all()]
+LIST_MAX = 200
+TEXT_FILTER = re.compile(r"[A-Za-z0-9 ._-]{1,64}")
+
+
+async def list_switches(inv: Inventory, name_contains: str | None = None, site: str | None = None,
+                        platform: str | None = None, limit: int = 50) -> dict:
+    """Approved switches. With a large estate the list is filtered and capped so it fits the agent's context."""
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= LIST_MAX:
+        raise ValidationError(f"limit must be 1-{LIST_MAX}")
+    for label, val in (("name_contains", name_contains), ("site", site)):
+        if val is not None and not TEXT_FILTER.fullmatch(val):
+            raise ValidationError(f"{label}: up to 64 letters, digits, space and . _ -")
+    if platform is not None and platform.lower() not in {"fabric", "exos", "ers", "other"}:
+        raise ValidationError("platform must be one of fabric, exos, ers, other")
+    allsw = inv.all()
+    rows = allsw
+    if name_contains:
+        rows = [s for s in rows if name_contains.lower() in s.name.lower()]
+    if site:
+        rows = [s for s in rows if s.site.lower() == site.lower()]
+    if platform:
+        rows = [s for s in rows if s.platform == platform.lower()]
+    out = {"total_switches": len(allsw), "matched": len(rows), "returned": min(len(rows), limit),
+           "switches": [{"name": s.name, "management_ip": s.management_ip, "site": s.site, "model": s.model or None,
+                         "platform": s.platform, "protocols": list(s.protocols), "snmp_security": s.snmp_security}
+                        for s in rows[:limit]]}
+    if len(rows) > limit:
+        out["note"] = f"{len(rows) - limit} more match; narrow with name_contains, site or platform, or raise limit"
+    if not (name_contains or site or platform):
+        counts: dict[str, int] = {}
+        for s in allsw:
+            counts[s.site or "(none)"] = counts.get(s.site or "(none)", 0) + 1
+        out["sites"] = counts
+    return out
 
 
 # Fabric Engine (Rapid City MIB) health OIDs

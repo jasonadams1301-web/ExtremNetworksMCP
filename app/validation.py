@@ -10,7 +10,9 @@ PORT_RES = {
     "exos": re.compile(r"[0-9]{1,3}(:[0-9]{1,3})?"),
 }
 PLATFORM_ALIASES = {"fabric": "fabric", "fabric-engine": "fabric", "voss": "fabric",
-                    "exos": "exos", "switch-engine": "exos"}
+                    "exos": "exos", "switch-engine": "exos",
+                    # not yet supported by the port/SSH tools; listed so the whole estate is in one inventory
+                    "ers": "ers", "boss": "ers", "other": "other", "unknown": "other"}
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
@@ -25,6 +27,7 @@ class Switch:
     platform: str
     site: str
     protocols: tuple[str, ...]
+    model: str = ""                      # free text, shown to the agent (for example "VSP 4000")
     snmp_security: str = "authpriv"      # "authpriv" (default), or an explicit per-switch opt-in: "authnopriv" / "noauth"
 
 
@@ -52,6 +55,7 @@ class Inventory:
                 management_ip=str(e["management_ip"]),
                 platform=PLATFORM_ALIASES[str(e.get("platform", "fabric")).lower()],
                 site=str(e.get("site", "")),
+                model=str(e.get("model", "") or ""),
                 protocols=tuple(e.get("protocols", [])),
                 snmp_security=_snmp_security(e.get("snmp_security"), str(e["name"])),
             )
@@ -85,7 +89,9 @@ class Inventory:
 
 def validate_port(port: str, platform: str = "fabric") -> str:
     rx = PORT_RES.get(platform)
-    if rx is None or not isinstance(port, str) or not rx.fullmatch(port):
+    if rx is None:
+        raise ValidationError(f"port-based tools are not supported for platform '{platform}'")
+    if not isinstance(port, str) or not rx.fullmatch(port):
         example = "1/1 or 1/1/1" if platform == "fabric" else "48 or 1:48"
         raise ValidationError(f"invalid port; expected e.g. {example}")
     return port

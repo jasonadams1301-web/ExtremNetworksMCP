@@ -299,9 +299,8 @@ async def test_noauth_switch_is_marked_in_list_and_health(tmp_path, monkeypatch)
             return {o: "x" for o in oids}
 
     mcp = build_server(inv, S(), Audit(None))
-    res = await mcp.call_tool("list_switches", {})
-    contents = res[0] if isinstance(res, tuple) else res
-    rows = {json.loads(c.text)["name"]: json.loads(c.text) for c in contents}
+    out = json.loads((await mcp.call_tool("list_switches", {}))[0].text)
+    rows = {r["name"]: r for r in out["switches"]}
     assert rows["legacy"]["snmp_security"] == "noauth" and rows["modern"]["snmp_security"] == "authpriv"
     health = json.loads((await mcp.call_tool("get_switch_health", {"switch": "legacy"}))[0].text)
     assert health["snmp_security"] == "noauth" and "unauthenticated" in health["security_note"]
@@ -359,3 +358,56 @@ async def test_authnopriv_switch_is_marked_in_list_and_health(tmp_path):
     mcp = build_server(inv, S(), Audit(None))
     health = json.loads((await mcp.call_tool("get_switch_health", {"switch": "older"}))[0].text)
     assert health["snmp_security"] == "authnopriv" and "authenticated, not encrypted" in health["security_note"]
+
+
+# ---------------- list_switches scales to a large estate ----------------
+def _big_inventory(tmp_path, n=130):
+    lines = ["switches:"]
+    for i in range(n):
+        site = f"Site{i % 13}"
+        plat = "ers" if i % 9 == 0 else "fabric"
+        model = "ERS4850" if plat == "ers" else ("VSP 4000" if i % 2 else "UPFE 5420M")
+        lines.append(f"  - {{name: {site}-SW{i}, management_ip: 192.0.2.{i + 1}, platform: {plat}, site: {site}, "
+                     f"model: '{model}', mcp_enabled: true, protocols: [snmpv3]}}")
+    p = tmp_path / "big.yaml"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return _Inv.load(str(p))
+
+
+async def _list(mcp, **args):
+    return json.loads((await mcp.call_tool("list_switches", args))[0].text)
+
+
+async def test_list_switches_is_capped_and_summarised_by_default(tmp_path):
+    mcp = build_server(_big_inventory(tmp_path), FakeSnmp(), Audit(None))
+    out = await _list(mcp)
+    assert out["total_switches"] == 130 and out["matched"] == 130 and out["returned"] == 50 == len(out["switches"])
+    assert "80 more match" in out["note"] and len(out["sites"]) == 13 and sum(out["sites"].values()) == 130
+    assert out["switches"][0]["model"] in ("VSP 4000", "UPFE 5420M", "ERS4850")
+
+
+async def test_list_switches_filters(tmp_path):
+    mcp = build_server(_big_inventory(tmp_path), FakeSnmp(), Audit(None))
+    assert {r["site"] for r in (await _list(mcp, site="site3"))["switches"]} == {"Site3"}
+    out = await _list(mcp, site="Site3")
+    assert out["matched"] == 10 and "sites" not in out and "note" not in out
+    names = [r["name"] for r in (await _list(mcp, name_contains="sw12", limit=200))["switches"]]
+    assert "Site12-SW12" in names and all("sw12" in n.lower() for n in names) and len(names) == 11   # SW12, SW120-SW129
+    ers = await _list(mcp, platform="ers", limit=200)
+    assert ers["matched"] == 15 and all(r["platform"] == "ers" for r in ers["switches"])
+    assert (await _list(mcp, name_contains="Site1-", limit=200))["matched"] == len(
+        [i for i in range(130) if f"Site{i % 13}-SW{i}".lower().startswith("site1-")])
+    assert (await _list(mcp, limit=200))["returned"] == 130
+
+
+@pytest.mark.parametrize("bad", [{"limit": 0}, {"limit": 201}, {"platform": "cisco"}, {"site": "a;b"},
+                                 {"name_contains": "$(id)"}, {"name_contains": "x" * 65}])
+async def test_list_switches_bad_arguments(tmp_path, bad):
+    with pytest.raises(Exception):
+        await build_server(_big_inventory(tmp_path, 3), FakeSnmp(), Audit(None)).call_tool("list_switches", bad)
+
+
+def test_unsupported_platform_gives_a_clear_port_error():
+    from app.validation import validate_port
+    with pytest.raises(ValidationError, match="not supported for platform 'ers'"):
+        validate_port("1/1", "ers")
