@@ -18,6 +18,7 @@ from app.tools import config as cf
 from app.tools import dhcp as dh
 from app.tools import fabric as fb
 from app.tools import ports as pt
+from app.tools import privileged as pv
 from app.tools import routing as rt
 from app.tools import ssh_tools as st
 from app.tools import switches as t
@@ -143,6 +144,36 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
         async def get_auth_status(switch: str) -> dict:
             """Return 802.1X (EAPOL) client counts and RADIUS reachability. Credential fields are hidden."""
             return await au.get_auth_status(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_interface_detail", "ssh")
+        @tagged
+        async def get_interface_detail(switch: str, port: str) -> dict:
+            """Return the switch's own detailed output for one port (e.g. '1/9'): interface state, traffic statistics and
+            Ethernet error counters (link failures, FCS errors, discards). Counters are cumulative."""
+            return await pv.get_interface_detail(inv, ssh, switch, port)
+
+        @mcp.tool()
+        @audit.tool("get_optics", "ssh")
+        @tagged
+        async def get_optics(switch: str, port: str | None = None) -> dict:
+            """Return the pluggable optical module table (type, vendor, part number, DDM support) for all ports. Give port
+            (e.g. '1/49') to also get that module's detail, including light levels and temperature when it supports DDM."""
+            return await pv.get_optics(inv, ssh, switch, port)
+
+        @mcp.tool()
+        @audit.tool("get_ntp_status", "ssh")
+        @tagged
+        async def get_ntp_status(switch: str) -> dict:
+            """Return the configured NTP servers and their sync status (stratum, reachability, offset)."""
+            return await pv.get_ntp_status(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_mlt_status", "ssh")
+        @tagged
+        async def get_mlt_status(switch: str) -> dict:
+            """Return the multi-link trunk (MLT / link aggregation) table for a switch, and whether any MLT is configured."""
+            return await pv.get_mlt_status(inv, ssh, switch)
 
         @mcp.tool()
         @audit.tool("get_running_config", "ssh")

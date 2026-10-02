@@ -159,7 +159,10 @@ async def test_enable_not_accepted_is_a_clear_error_and_no_command_runs():
 
 
 def test_only_flagged_commands_are_privileged_and_all_are_shows():
-    assert PRIVILEGED == {"running_config"} and PRIVILEGED <= set(COMMANDS)
+    assert PRIVILEGED <= set(COMMANDS) and "running_config" in PRIVILEGED
+    unprivileged = {"sys_info", "log_tail", "isis_adjacencies", "mac_table", "arp", "vlan_basic", "ip_route", "isis_spbm",
+                    "stp_status", "dhcp_server"}
+    assert not unprivileged & PRIVILEGED                                   # escalation only where it is needed
     assert COMMANDS["running_config"][0] == "show running-config"
     assert all(t.startswith("show ") for t, _ in COMMANDS.values())
 

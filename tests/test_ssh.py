@@ -7,7 +7,7 @@ from app.main import build_server
 from app.validation import Inventory, Switch, ValidationError
 
 SSH_TOOLS = {"get_system_info", "get_fabric_adjacencies", "find_mac_address",
-             "get_switch_logs", "get_running_config", "get_dhcp_server", "get_dhcp_leases", "get_dhcp_relay", "get_dhcp_server_log", "get_arp_table",
+             "get_switch_logs", "get_running_config", "get_interface_detail", "get_optics", "get_ntp_status", "get_mlt_status", "get_dhcp_server", "get_dhcp_leases", "get_dhcp_relay", "get_dhcp_server_log", "get_arp_table",
              "get_vlans", "get_routing", "get_fabric_status", "get_auth_status"}
 META = set(";|&$`<>\\\n\r()'\"!{}")
 
@@ -88,7 +88,7 @@ async def test_ssh_tools_only_registered_when_enabled(inv, tmp_path):
 async def test_ssh_catalogue_has_exactly_the_five_ssh_tools(server):
     mcp, _ = server
     names = {t.name for t in await mcp.list_tools()}
-    assert SSH_TOOLS <= names and len(names) == 21
+    assert SSH_TOOLS <= names and len(names) == 25
     # no tool that runs commands or changes anything: reading a configuration is fine, configuring is not
     assert not any(n.startswith(("configure", "set_", "write", "run_", "exec", "save", "reload", "reboot", "delete"))
                    or "command" in n for n in names)

@@ -18,7 +18,7 @@ import re
 import asyncssh
 
 from app.secrets import get_secret
-from app.validation import ValidationError
+from app.validation import PORT_RES, ValidationError
 
 VRF_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,15}")
 
@@ -35,7 +35,17 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "dhcp_log": ("show ip dhcp-server log", {}),
     "dhcp_relay_counters": ("show ip dhcp-relay counters", {}),
     "dhcp_relay_fwd": ("show ip dhcp-relay fwd-path", {}),
+    # --- privileged (need `enable`; see PRIVILEGED) ---
     "running_config": ("show running-config", {}),
+    "interface": ("show interfaces gigabitEthernet interface {port}", {"port": PORT_RES["fabric"]}),
+    "interface_stats": ("show interfaces gigabitEthernet statistics {port}", {"port": PORT_RES["fabric"]}),
+    "interface_errors": ("show interfaces gigabitEthernet error {port}", {"port": PORT_RES["fabric"]}),
+    "optics_basic": ("show pluggable-optical-modules basic", {}),
+    "optics_detail": ("show pluggable-optical-modules detail", {}),
+    "ntp_server": ("show ntp server", {}),
+    "ntp_stats": ("show ntp statistics", {}),
+    "mlt": ("show mlt", {}),
+    # --- unprivileged ---
     "arp": ("show ip arp", {}),
     "arp_vrf": ("show ip arp vrf {vrf}", {"vrf": VRF_NAME}),
     "vlan_basic": ("show vlan basic", {}),
@@ -55,7 +65,8 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
 # Commands that only work in privileged mode (the account must be allowed to use `enable`, which needs no password
 # here). They run in their OWN session, never mixed with unprivileged commands, and nothing but `show` commands
 # is ever sent after `enable`.
-PRIVILEGED = {"running_config"}
+PRIVILEGED = {"running_config", "interface", "interface_stats", "interface_errors", "optics_basic", "optics_detail",
+              "ntp_server", "ntp_stats", "mlt"}
 ENABLE = "enable"
 MAX_OUTPUT = 20000
 MAX_PAGES = 1000        # a safety stop only: max_chars bounds the output (a long running-config is hundreds of pages)

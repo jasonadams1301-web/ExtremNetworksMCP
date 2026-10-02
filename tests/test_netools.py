@@ -152,7 +152,9 @@ def test_new_commands_are_fixed_plain_shows():
                 "isis_system_id", "stp_status", "eapol_summary", "radius_reachability"):
         assert COMMANDS[key][0].startswith("show ") and not COMMANDS[key][1]
     assert build_command("ip_route_vrf", vrf="guest") == "show ip route vrf guest"
-    assert "interface_stats" not in COMMANDS and "interface" not in COMMANDS      # never worked for this account
+    from app.adapters.ssh import PRIVILEGED
+    # the per-port interface commands are refused in user mode, so they exist only as privileged (enable) commands
+    assert {"interface", "interface_stats", "interface_errors"} <= PRIVILEGED
 
 
 def test_count_ports():
