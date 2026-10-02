@@ -35,6 +35,7 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "dhcp_log": ("show ip dhcp-server log", {}),
     "dhcp_relay_counters": ("show ip dhcp-relay counters", {}),
     "dhcp_relay_fwd": ("show ip dhcp-relay fwd-path", {}),
+    "running_config": ("show running-config", {}),
     "arp": ("show ip arp", {}),
     "arp_vrf": ("show ip arp vrf {vrf}", {"vrf": VRF_NAME}),
     "vlan_basic": ("show vlan basic", {}),
@@ -51,6 +52,11 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "eapol_summary": ("show eapol summary", {}),
     "radius_reachability": ("show radius reachability", {}),
 }
+# Commands that only work in privileged mode (the account must be allowed to use `enable`, which needs no password
+# here). They run in their OWN session, never mixed with unprivileged commands, and nothing but `show` commands
+# is ever sent after `enable`.
+PRIVILEGED = {"running_config"}
+ENABLE = "enable"
 MAX_OUTPUT = 20000
 MAX_PAGES = 40
 
@@ -123,12 +129,29 @@ async def _command(proc, cmd: str, want_lines: int | None, max_chars: int, deadl
             proc.stdin.write("q" if enough else " ")
 
 
-async def drive_commands(proc, jobs: list[tuple[str, int | None, int]], timeout: float) -> list[str]:
-    """Wait for the CLI prompt, then run each (cmd, want_lines, max_chars) in turn within one session."""
+async def _enable(proc, deadline: float) -> None:
+    """Switch to privileged mode with `enable`. A password prompt is refused: we never type a password here."""
+    proc.stdin.write(ENABLE + "\n")
+    buf = ""
+    while True:
+        buf += await _read(proc, deadline)
+        if re.search(r"[Pp]assword\s*:?\s*$", buf[-60:]):
+            raise SshError("the switch asks for an enable password, which is not supported")
+        if PROMPT_END.search(buf[-120:]):
+            if not re.search(r":\d+# ?$", ERASE.sub("", buf)):
+                raise SshError("this account cannot enter privileged mode (enable was not accepted)")
+            return
+
+
+async def drive_commands(proc, jobs: list[tuple[str, int | None, int]], timeout: float,
+                         privileged: bool = False) -> list[str]:
+    """Wait for the CLI prompt, optionally `enable`, then run each (cmd, want_lines, max_chars) in one session."""
     deadline = asyncio.get_running_loop().time() + timeout
     buf = ""
     while not PROMPT_END.search(buf):               # login banner, then the prompt
         buf += await _read(proc, deadline)
+    if privileged:
+        await _enable(proc, deadline)
     return [await _command(proc, cmd, wl, mc, deadline) for cmd, wl, mc in jobs]
 
 
@@ -152,6 +175,10 @@ class SshClient:
         """Run several fixed commands in ONE login. Each job: {key, args, want_lines, max_chars}."""
         planned = [(build_command(j["key"], **j.get("args", {})), j.get("want_lines"),
                     j.get("max_chars", MAX_OUTPUT)) for j in jobs]   # validate everything before connecting
+        flags = {j["key"] in PRIVILEGED for j in jobs}
+        if len(flags) > 1:
+            raise SshError("privileged and unprivileged commands cannot share a session")
+        privileged = flags == {True}
         user, pw = get_secret("SSH_USERNAME"), get_secret("SSH_PASSWORD")
         keyfile = os.environ.get("SSH_KEY_FILE")
         if not user or not (pw or keyfile):
@@ -166,7 +193,7 @@ class SshClient:
                         connect_timeout=self.connect_timeout, login_timeout=self.connect_timeout) as conn:
                     proc = await conn.create_process(term_type="vt100", term_size=(250, 50),
                                                      encoding="utf-8", errors="replace")
-                    outs = await drive_commands(proc, planned, timeout or self.command_timeout)
+                    outs = await drive_commands(proc, planned, timeout or self.command_timeout, privileged)
         except asyncssh.HostKeyNotVerifiable:
             raise SshError("host key verification failed") from None  # never auto-trust a changed key
         except (asyncssh.Error, OSError, asyncio.TimeoutError) as e:
