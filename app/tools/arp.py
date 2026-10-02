@@ -16,6 +16,7 @@ FOOTER = re.compile(r"(\d+) out of (\d+) ARP entries displayed")
 TITLE = re.compile(r"IP Arp - (\S+)")
 TYPE_RE = re.compile(r"[A-Za-z_-]{1,16}")
 VRF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,15}")
+SWITCH_ERROR = re.compile(r"^Error:\s*(.+)$", re.M)
 BIG = 400000
 
 
@@ -93,6 +94,13 @@ async def get_arp_table(inv: Inventory, ssh: SshClient, switch: str, contains: s
         out["parse_warnings"] = [f"{len(parsed['unparsed'])} line(s) looked like ARP rows but could not be parsed"]
         out["unparsed_lines"] = parsed["unparsed"][:10]
     elif not total and text.strip() and "ARP entries displayed" not in text:
-        out["parse_warnings"] = ["no ARP rows recognised; raw output attached"]
-        out["raw_output"] = text[:3000]
+        err = SWITCH_ERROR.search(text)
+        if err:       # the switch refused the request (unknown VRF, etc.): say so plainly
+            out["switch_error"] = err.group(1).strip()
+            out["parse_warnings"] = ["the switch rejected the request: " + out["switch_error"]]
+            if vrf and vrf.lower() == "globalrouter":
+                out["hint"] = "omit vrf to read the global routing table; the VRF argument is for named VRFs only"
+        else:
+            out["parse_warnings"] = ["no ARP rows recognised; raw output attached"]
+            out["raw_output"] = text[:3000]
     return out

@@ -145,3 +145,19 @@ async def test_rejected_for_exos_unknown_and_when_ssh_disabled(inv):
             await mcp.call_tool("get_arp_table", {"switch": sw})
     assert ssh.calls == []
     assert "get_arp_table" not in {t.name for t in await build_server(inv, SnmpClient(), Audit(None)).list_tools()}
+
+
+ERR_VRF = BANNER + "Error: The VRF Name entered does not correspond to any VRF\n"
+ERR_GLOBAL = BANNER + "Error: The GlobalRouter cannot be accessed by name. \n"
+
+
+async def test_switch_error_message_is_passed_through(inv):
+    out = await call(server(inv, FakeSsh({"arp_vrf": ERR_VRF})), switch="fab1", vrf="nosuchvrf")
+    assert out["switch_error"] == "The VRF Name entered does not correspond to any VRF"
+    assert out["parse_warnings"] == ["the switch rejected the request: " + out["switch_error"]]
+    assert "raw_output" not in out and "hint" not in out
+
+
+async def test_globalrouter_by_name_gets_a_hint(inv):
+    out = await call(server(inv, FakeSsh({"arp_vrf": ERR_GLOBAL})), switch="fab1", vrf="GlobalRouter")
+    assert "cannot be accessed by name" in out["switch_error"] and "omit vrf" in out["hint"]
