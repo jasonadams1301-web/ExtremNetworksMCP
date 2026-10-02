@@ -6,8 +6,9 @@ from app.audit import Audit
 from app.main import build_server
 from app.validation import Inventory, Switch, ValidationError
 
-SSH_TOOLS = {"get_system_info", "get_fabric_adjacencies", "get_interface_detail", "find_mac_address",
-             "get_switch_logs", "get_dhcp_server", "get_dhcp_leases", "get_dhcp_relay", "get_dhcp_server_log", "get_arp_table"}
+SSH_TOOLS = {"get_system_info", "get_fabric_adjacencies", "find_mac_address",
+             "get_switch_logs", "get_dhcp_server", "get_dhcp_leases", "get_dhcp_relay", "get_dhcp_server_log", "get_arp_table",
+             "get_vlans", "get_routing", "get_fabric_status", "get_auth_status"}
 META = set(";|&$`<>\\\n\r()'\"!{}")
 
 
@@ -64,10 +65,10 @@ def test_every_command_is_a_plain_show():
         assert not (META & set(static)), key
 
 
-@pytest.mark.parametrize("bad", ["1/1; reload", "1/1 && x", "$(id)", "1:48", "", "1/1\nconf t"])
-def test_port_argument_injection_rejected(bad):
+@pytest.mark.parametrize("bad", ["x; reload", "x && y", "$(id)", "a b", "", "x\nconf t", "-x", "x" * 17])
+def test_vrf_argument_injection_rejected(bad):
     with pytest.raises(ValidationError):
-        build_command("interface", port=bad)
+        build_command("arp_vrf", vrf=bad)
 
 
 def test_unknown_or_arbitrary_commands_rejected():
@@ -76,7 +77,7 @@ def test_unknown_or_arbitrary_commands_rejected():
     with pytest.raises(SshError):
         build_command("sys_info", extra="x")
     with pytest.raises(SshError):
-        build_command("interface")
+        build_command("arp_vrf")
 
 
 async def test_ssh_tools_only_registered_when_enabled(inv, tmp_path):
@@ -87,7 +88,7 @@ async def test_ssh_tools_only_registered_when_enabled(inv, tmp_path):
 async def test_ssh_catalogue_has_exactly_the_five_ssh_tools(server):
     mcp, _ = server
     names = {t.name for t in await mcp.list_tools()}
-    assert SSH_TOOLS <= names and len(names) == 16
+    assert SSH_TOOLS <= names and len(names) == 20
     assert not any("run" in n or "command" in n or "config" in n for n in names)
 
 
@@ -97,15 +98,6 @@ async def test_exos_and_snmp_only_switches_rejected_for_ssh(server):
         with pytest.raises(Exception):
             await mcp.call_tool("get_system_info", {"switch": sw})
     assert ssh.calls == []
-
-
-async def test_interface_detail_runs_three_fixed_commands(server):
-    mcp, ssh = server
-    await mcp.call_tool("get_interface_detail", {"switch": "fab1", "port": "1/12"})
-    assert [c[1] for c in ssh.calls] == ["interface", "interface_stats", "interface_errors"]
-    with pytest.raises(Exception):
-        await mcp.call_tool("get_interface_detail", {"switch": "fab1", "port": "1/1; reload"})
-    assert len(ssh.calls) == 3
 
 
 @pytest.mark.parametrize("mac", ["00:11:22:33:44:55", "0011.2233.4455", "00-11-22-33-44-55", "001122334455"])

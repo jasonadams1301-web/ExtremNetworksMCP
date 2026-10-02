@@ -13,9 +13,14 @@ from app.adapters.snmp import SnmpClient
 from app.adapters.ssh import SshClient
 from app.audit import Audit
 from app.tools import arp as ar
+from app.tools import auth as au
 from app.tools import dhcp as dh
+from app.tools import fabric as fb
+from app.tools import ports as pt
+from app.tools import routing as rt
 from app.tools import ssh_tools as st
 from app.tools import switches as t
+from app.tools import vlans as vl
 from app.validation import Inventory
 
 
@@ -78,6 +83,15 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
         """Return LLDP neighbours and local-port mappings."""
         return await t.get_lldp_neighbors(inv, snmp, switch)
 
+    @mcp.tool()
+    @audit.tool("get_port_summary", "snmpv3")
+    @tagged
+    async def get_port_summary(switch: str, state: str | None = None, only_errors: bool = False,
+                               changed_within_minutes: int | None = None, limit: int = 100) -> dict:
+        """Return every physical port with state (up, down, admin_down), speed, error/discard counters and how long
+        ago it last changed state. Filters: state, only_errors, changed_within_minutes (finds recent flaps), limit."""
+        return await pt.get_port_summary(inv, snmp, switch, state, only_errors, changed_within_minutes, limit)
+
     if ssh is not None:  # Phase 2: fixed read-only show commands, Fabric Engine only
         @mcp.tool()
         @audit.tool("get_system_info", "ssh")
@@ -94,11 +108,38 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
             return await st.get_fabric_adjacencies(inv, ssh, switch)
 
         @mcp.tool()
-        @audit.tool("get_interface_detail", "ssh")
+        @audit.tool("get_vlans", "ssh")
         @tagged
-        async def get_interface_detail(switch: str, port: str) -> dict:
-            """Return detailed interface, statistics and error output for one port (e.g. '1/1')."""
-            return await st.get_interface_detail(inv, ssh, switch, port)
+        async def get_vlans(switch: str, vlan: int | None = None, name_contains: str | None = None,
+                            limit: int = 100) -> dict:
+            """Return VLANs with name, type, I-SID and port members (slot/port ranges). Optional filters: vlan
+            (1-4094) or name_contains."""
+            return await vl.get_vlans(inv, ssh, switch, vlan, name_contains, limit)
+
+        @mcp.tool()
+        @audit.tool("get_routing", "ssh")
+        @tagged
+        async def get_routing(switch: str, destination: str | None = None, protocol: str | None = None,
+                              vrf: str | None = None, limit: int = 100) -> dict:
+            """Return IP interfaces (address, up/down) and the route table. Give destination (an IPv4 address) to get
+            the route the switch would use for it. Optional protocol (LOC, STAT, ISIS, OSPF, BGP, RIP, SPBM) and
+            vrf (named VRFs only; omit for the global table)."""
+            return await rt.get_routing(inv, ssh, switch, destination, protocol, vrf, limit)
+
+        @mcp.tool()
+        @audit.tool("get_fabric_status", "ssh")
+        @tagged
+        async def get_fabric_status(switch: str) -> dict:
+            """Return SPB / IS-IS state (system id, nickname, interfaces up or down, adjacencies) and spanning-tree
+            topology-change counters (Fabric Engine)."""
+            return await fb.get_fabric_status(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_auth_status", "ssh")
+        @tagged
+        async def get_auth_status(switch: str) -> dict:
+            """Return 802.1X (EAPOL) client counts and RADIUS reachability. Credential fields are hidden."""
+            return await au.get_auth_status(inv, ssh, switch)
 
         @mcp.tool()
         @audit.tool("get_switch_logs", "ssh")

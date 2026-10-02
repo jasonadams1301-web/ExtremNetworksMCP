@@ -6,7 +6,7 @@ fetch the whole table and filter locally, so no caller-supplied text ever reache
 import re
 
 from app.adapters.ssh import SshClient
-from app.validation import Inventory, ValidationError, validate_port
+from app.validation import Inventory, ValidationError
 
 MAC_RE = re.compile(r"[0-9A-Fa-f]{2}([:.-]?[0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{4}(\.[0-9A-Fa-f]{4}){2}")
 MAX_MATCHES = 50
@@ -31,15 +31,6 @@ async def get_system_info(inv: Inventory, ssh: SshClient, switch: str) -> dict:
 async def get_fabric_adjacencies(inv: Inventory, ssh: SshClient, switch: str) -> dict:
     sw = _fabric_ssh(inv, switch)
     return {"switch": sw.name, "output": await ssh.run(sw.management_ip, "isis_adjacencies")}
-
-
-async def get_interface_detail(inv: Inventory, ssh: SshClient, switch: str, port: str) -> dict:
-    sw = _fabric_ssh(inv, switch)
-    port = validate_port(port, "fabric")
-    return {"switch": sw.name, "port": port,
-            "interface": await ssh.run(sw.management_ip, "interface", port=port),
-            "statistics": await ssh.run(sw.management_ip, "interface_stats", port=port),
-            "errors": await ssh.run(sw.management_ip, "interface_errors", port=port)}
 
 
 async def find_mac_address(inv: Inventory, ssh: SshClient, switch: str, mac: str) -> dict:

@@ -18,7 +18,9 @@ import re
 import asyncssh
 
 from app.secrets import get_secret
-from app.validation import PORT_RES, ValidationError
+from app.validation import ValidationError
+
+VRF_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,15}")
 
 # key -> (command template, {placeholder: validating regex})
 COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
@@ -26,9 +28,6 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "log_tail": ("show logging file tail", {}),
     "isis_adjacencies": ("show isis adjacencies", {}),
     "mac_table": ("show vlan mac-address-entry", {}),
-    "interface": ("show interfaces gigabitEthernet interface {port}", {"port": PORT_RES["fabric"]}),
-    "interface_stats": ("show interfaces gigabitEthernet statistics {port}", {"port": PORT_RES["fabric"]}),
-    "interface_errors": ("show interfaces gigabitEthernet error {port}", {"port": PORT_RES["fabric"]}),
     "dhcp_server": ("show ip dhcp-server", {}),
     "dhcp_subnets": ("show ip dhcp-server subnet", {}),
     "dhcp_hosts": ("show ip dhcp-server host", {}),
@@ -37,12 +36,26 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
     "dhcp_relay_counters": ("show ip dhcp-relay counters", {}),
     "dhcp_relay_fwd": ("show ip dhcp-relay fwd-path", {}),
     "arp": ("show ip arp", {}),
-    "arp_vrf": ("show ip arp vrf {vrf}", {"vrf": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,15}")}),
+    "arp_vrf": ("show ip arp vrf {vrf}", {"vrf": VRF_NAME}),
+    "vlan_basic": ("show vlan basic", {}),
+    "vlan_members": ("show vlan members", {}),
+    "vlan_isid": ("show vlan i-sid", {}),
+    "ip_interface": ("show ip interface", {}),
+    "ip_interface_vrf": ("show ip interface vrf {vrf}", {"vrf": VRF_NAME}),
+    "ip_route": ("show ip route", {}),
+    "ip_route_vrf": ("show ip route vrf {vrf}", {"vrf": VRF_NAME}),
+    "isis_spbm": ("show isis spbm", {}),
+    "isis_interface": ("show isis interface", {}),
+    "isis_system_id": ("show isis system-id", {}),
+    "stp_status": ("show spanning-tree status", {}),
+    "eapol_summary": ("show eapol summary", {}),
+    "radius_reachability": ("show radius reachability", {}),
 }
 MAX_OUTPUT = 20000
 MAX_PAGES = 40
 
 PROMPT_END = re.compile(r"(?:^|[\r\n\x08])[^\s\x08]+:\d+[>#] ?$")   # e.g. SWITCH-1:1> (may follow pager erasure)
+REJECTED = re.compile(r"^\s*(?:\^\s*)?%\s*(Invalid input|Incomplete command|Ambiguous command|Unrecognized command)", re.M)
 MORE = re.compile(r"--More--")
 MORE_TEXT = re.compile(r"--More--(?: \(q = quit\))? ?")
 ERASE = re.compile(r"(?:\x08 \x08)+|\x08")
@@ -158,4 +171,8 @@ class SshClient:
             raise SshError("host key verification failed") from None  # never auto-trust a changed key
         except (asyncssh.Error, OSError, asyncio.TimeoutError) as e:
             raise SshError(f"ssh failed: {type(e).__name__}") from None
+        for out, p in zip(outs, planned):
+            if REJECTED.search(out[:400]):
+                raise SshError(f"the switch rejected the command '{p[0]}' (this account or software release may not "
+                               "support it)")
         return [out[:p[2]] for out, p in zip(outs, planned)]

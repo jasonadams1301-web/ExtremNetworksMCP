@@ -9,7 +9,7 @@ from app.main import build_server
 from app.validation import Inventory, Switch, ValidationError, validate_port
 
 APPROVED_TOOLS = {"list_switches", "get_switch_health", "get_interface",
-                  "get_interface_errors", "get_lldp_neighbors", "get_dhcp_status"}
+                  "get_interface_errors", "get_lldp_neighbors", "get_dhcp_status", "get_port_summary"}
 
 
 class FakeSnmp(SnmpClient):
