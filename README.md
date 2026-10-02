@@ -15,7 +15,7 @@ It can look. It cannot change anything.
 
 | Tool | Backend | Platforms | What it returns |
 |---|---|---|---|
-| `list_switches` | inventory | all | Approved switches |
+| `list_switches` | inventory | all | Approved switches with model and platform; filter by `name_contains`, `site` or `platform`; capped at 50 by default with a site summary |
 | `get_switch_health` | SNMPv3 | Fabric Engine (basic fields on Switch Engine) | Uptime, CPU %, memory %, temperatures, power-supply state, fan hardware present |
 | `get_interface` | SNMPv3 | all | Admin/oper state, speed, counters for one port |
 | `get_interface_errors` | SNMPv3 | all | Error and discard counters for one port |
@@ -31,12 +31,30 @@ It can look. It cannot change anything.
 | `get_routing` | SSH | Fabric Engine | IP interfaces (flags down ones), route table, default route, and the route the switch would use for a given destination |
 | `get_fabric_status` | SSH | Fabric Engine | SPB / IS-IS system, interfaces up or down, adjacencies, spanning-tree topology-change counters |
 | `get_auth_status` | SSH | Fabric Engine | 802.1X client counts and RADIUS reachability (credential fields hidden) |
+| `get_running_config` | SSH (privileged) | Fabric Engine | The complete running configuration, unfiltered, plus its section list; read part of it with `section`, `search` or `offset`+`limit` |
+| `get_interface_detail` | SSH (privileged) | Fabric Engine | One port's interface state, traffic statistics and Ethernet error counters |
+| `get_optics` | SSH (privileged) | Fabric Engine | Pluggable optical module table; with a port, that module's detail (DDM light levels, temperature) |
+| `get_ntp_status` | SSH (privileged) | Fabric Engine | NTP servers and sync status (stratum, reachability) |
+| `get_mlt_status` | SSH (privileged) | Fabric Engine | MLT / link aggregation table |
 | `get_system_info` | SSH | Fabric Engine | `show sys-info` output |
 | `get_fabric_adjacencies` | SSH | Fabric Engine | IS-IS (SPB) adjacencies |
 | `get_arp_table` | SSH | Fabric Engine | ARP table (IP, MAC, VLAN, port, type, TTL); filter by IP/MAC fragment, subnet, VLAN, port, type or VRF |
 | `find_mac_address` | SSH | Fabric Engine | Where a MAC address is in the forwarding table |
 
 The SSH tools are only registered when `SSH_ENABLED=true`.
+
+## Privileged mode (`enable`)
+
+Some `show` commands (the full running configuration, per-port interface detail, optics, NTP status, MLT) only work in
+privileged mode. The SSH account must therefore be allowed to use `enable` without a password. These commands run in their
+**own session**, never mixed with unprivileged ones: the driver sends `enable`, then only fixed `show` commands from the
+table in `app/adapters/ssh.py`. If the switch asks for an enable password, or refuses `enable`, the call fails with a clear
+error and nothing else is sent. A higher-privilege account is a bigger target if the server were ever compromised, so keep
+its credentials as a root-only systemd credential, and limit what it can do on the switch to what you need.
+
+`get_running_config` returns the configuration **unfiltered**, because its readers are network administrators. Set
+`CONFIG_REDACT=true` in `/etc/extreme-mcp/extreme-mcp.env` to redact secret-looking values (`app/redact.py`, best-effort) before
+the text leaves the server. Either way the configuration text passes through OCE, so treat OCE's session logs as sensitive.
 
 ## Security model
 
@@ -149,7 +167,8 @@ Inventory (`/etc/extreme-mcp/inventory.yaml`), re-read on service restart:
 switches:
   - name: example-switch-01        # what the agent uses; letters, digits, . _ -
     management_ip: 192.0.2.10
-    platform: fabric              # fabric (Fabric Engine / VOSS) or exos (Switch Engine)
+    platform: fabric              # fabric (Fabric Engine / VOSS), exos (Switch Engine), ers or other (basic SNMP tools only)
+    model: "5420M-48W-4YE"         # optional free text shown to the agent
     site: Example Site
     mcp_enabled: true
     protocols: [snmpv3, ssh]
@@ -166,6 +185,7 @@ Settings (`/etc/extreme-mcp/extreme-mcp.env`, see `extreme-mcp.env.example`):
 | `SNMP_PRIV_PROTOCOL` | `aes` | `aes` or `aes256` |
 | `SNMP_TIMEOUT_SECONDS` / `SNMP_RETRIES` | `5` / `1` | SNMP timing |
 | `SSH_ENABLED` | `false` | Register the SSH tools |
+| `CONFIG_REDACT` | `false` | Redact secret-looking values in `get_running_config` output |
 | `SSH_KNOWN_HOSTS` | `/etc/extreme-mcp/known_hosts` | Approved host keys |
 | `SSH_CONNECT_TIMEOUT_SECONDS` / `SSH_COMMAND_TIMEOUT_SECONDS` | `8` / `20` | SSH timing |
 | `SSH_MAX_PARALLEL` | `5` | Concurrent SSH sessions |
@@ -234,8 +254,7 @@ Other platforms and releases may differ, so check the SNMP OIDs and `show` comma
 
 - Fan speed and status are not exposed over SNMP on the tested platform. Only installed fan trays are listed.
 - Switch Engine (EXOS) has no SSH tools yet, and only basic fields from `get_switch_health`.
-- Stack health, LACP/MLT detail, fibre-optic (transceiver) levels and per-port CLI statistics are not available: the
-  read-only account cannot run `show interfaces ...` on the tested release. Per-port state and errors come from SNMP.
+- LACP port detail and stack health are not implemented. Per-port state and errors are also available over SNMP.
 - Stack health is not implemented. The DHCP server log is a short rolling window and can lag the switch clock.
 - One shared SNMPv3 credential set and one shared SSH account for all switches.
 - Log search looks back about 1,000 lines when a severity or text filter is used.
