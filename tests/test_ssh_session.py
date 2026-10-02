@@ -106,3 +106,69 @@ async def test_driver_runs_several_commands_in_one_session():
     outs = await drive_commands(proc, [("show a", None, 1000), ("show b", None, 1000)], timeout=5)
     assert outs == ["result for show a", "result for show b"]
     assert proc.stdin.written == ["show a\n", "show b\n"]
+
+
+# ---------------- privileged mode (enable) ----------------
+from app.adapters.ssh import COMMANDS, PRIVILEGED, SshClient, drive_commands  # noqa: E402
+
+
+class EnableProc:
+    """Switch that starts at 'SWITCH-1:1>' and answers `enable` according to `mode`."""
+
+    def __init__(self, mode="ok"):
+        self.mode = mode
+        self.stdout = _Out(["\r\r\nSWITCH-1:1>"])
+        self.stdin = _In(self._on_write)
+
+    def _on_write(self, data):
+        text = data.strip()
+        if text == "enable":
+            reply = {"ok": "enable\r\r\nSWITCH-1:1#", "password": "enable\r\r\nPassword: ",
+                     "refused": "enable\r\r\n% Access denied\r\nSWITCH-1:1>"}[self.mode]
+            self.stdout.q.append(reply)
+        elif text.startswith("show"):
+            prompt = "SWITCH-1:1#" if self.mode == "ok" else "SWITCH-1:1>"
+            self.stdout.q.append(text + "\r\r\nline one\r\nline two\r\n" + prompt)
+
+
+async def test_enable_is_sent_before_privileged_commands_and_nothing_else():
+    proc = EnableProc("ok")
+    out = await drive_commands(proc, [("show running-config", None, 10000)], timeout=5, privileged=True)
+    assert out == ["line one\nline two"]
+    assert proc.stdin.written == ["enable\n", "show running-config\n"]
+
+
+async def test_unprivileged_sessions_never_send_enable():
+    proc = EnableProc("ok")
+    await drive_commands(proc, [("show sys-info", None, 10000)], timeout=5, privileged=False)
+    assert proc.stdin.written == ["show sys-info\n"]
+
+
+async def test_enable_password_prompt_is_refused_without_typing_anything():
+    proc = EnableProc("password")
+    with pytest.raises(SshError, match="enable password"):
+        await drive_commands(proc, [("show running-config", None, 10000)], timeout=5, privileged=True)
+    assert proc.stdin.written == ["enable\n"]                              # no password, no command sent
+
+
+async def test_enable_not_accepted_is_a_clear_error_and_no_command_runs():
+    proc = EnableProc("refused")
+    with pytest.raises(SshError, match="cannot enter privileged mode"):
+        await drive_commands(proc, [("show running-config", None, 10000)], timeout=5, privileged=True)
+    assert proc.stdin.written == ["enable\n"]
+
+
+def test_only_flagged_commands_are_privileged_and_all_are_shows():
+    assert PRIVILEGED == {"running_config"} and PRIVILEGED <= set(COMMANDS)
+    assert COMMANDS["running_config"][0] == "show running-config"
+    assert all(t.startswith("show ") for t, _ in COMMANDS.values())
+
+
+async def test_privileged_and_unprivileged_commands_cannot_share_a_session(monkeypatch, tmp_path):
+    monkeypatch.setenv("SSH_USERNAME", "ro")
+    monkeypatch.setenv("SSH_PASSWORD", "x")
+    kh = tmp_path / "kh"
+    kh.write_text("x")
+    monkeypatch.setenv("SSH_KNOWN_HOSTS", str(kh))
+    with pytest.raises(SshError, match="cannot share a session"):
+        await SshClient().run_many("192.0.2.20", [{"key": "running_config"}, {"key": "sys_info"}])

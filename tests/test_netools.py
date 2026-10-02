@@ -163,7 +163,7 @@ def test_count_ports():
 async def test_switch_rejected_command_becomes_a_clear_error(monkeypatch, tmp_path):
     from app.adapters import ssh as ssh_mod
 
-    async def fake_drive(proc, jobs, timeout):
+    async def fake_drive(proc, jobs, timeout, privileged=False):
         return ["                ^\n% Invalid input detected at '^' marker."]
 
     class Conn:

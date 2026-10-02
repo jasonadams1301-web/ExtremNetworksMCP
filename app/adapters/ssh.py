@@ -58,7 +58,7 @@ COMMANDS: dict[str, tuple[str, dict[str, re.Pattern]]] = {
 PRIVILEGED = {"running_config"}
 ENABLE = "enable"
 MAX_OUTPUT = 20000
-MAX_PAGES = 40
+MAX_PAGES = 1000        # a safety stop only: max_chars bounds the output (a long running-config is hundreds of pages)
 
 PROMPT_END = re.compile(r"(?:^|[\r\n\x08])[^\s\x08]+:\d+[>#] ?$")   # e.g. SWITCH-1:1> (may follow pager erasure)
 REJECTED = re.compile(r"^\s*(?:\^\s*)?%\s*(Invalid input|Incomplete command|Ambiguous command|Unrecognized command)", re.M)

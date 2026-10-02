@@ -14,6 +14,7 @@ from app.adapters.ssh import SshClient
 from app.audit import Audit
 from app.tools import arp as ar
 from app.tools import auth as au
+from app.tools import config as cf
 from app.tools import dhcp as dh
 from app.tools import fabric as fb
 from app.tools import ports as pt
@@ -142,6 +143,17 @@ def build_server(inv: Inventory, snmp: SnmpClient, audit: Audit, ssh: SshClient 
         async def get_auth_status(switch: str) -> dict:
             """Return 802.1X (EAPOL) client counts and RADIUS reachability. Credential fields are hidden."""
             return await au.get_auth_status(inv, ssh, switch)
+
+        @mcp.tool()
+        @audit.tool("get_running_config", "ssh")
+        @tagged
+        async def get_running_config(switch: str, section: str | None = None, search: str | None = None,
+                                     context: int = 2, offset: int | None = None, limit: int = 4000) -> dict:
+            """Return a switch's COMPLETE running configuration (unfiltered) as one text block, plus the list of sections
+            (name, first line, line count). To read part of it instead: section (text from a section name, e.g. 'SNMP'),
+            search (text to find, with context lines around each match, to check whether a setting exists such as 'ntp'),
+            or offset+limit to read numbered lines."""
+            return await cf.get_running_config(inv, ssh, switch, section, search, context, offset, limit)
 
         @mcp.tool()
         @audit.tool("get_switch_logs", "ssh")

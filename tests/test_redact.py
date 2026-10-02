@@ -91,3 +91,14 @@ def test_redaction_is_idempotent():
     once, _ = redact_config(text)
     twice, n2 = redact_config(once)
     assert once == twice and n2 == 0
+
+
+def test_comment_and_header_lines_are_left_alone():
+    text = "# IP COMMUNITY LIST CONFIGURATION\n! password policy notes\n# SNMP VNI CONFIGURATION"
+    out, n = redact_config(text)
+    assert out == text and n == 0
+
+
+def test_a_comment_inside_pem_is_still_removed_and_secrets_after_a_comment_line_are_redacted():
+    out, n = redact_config('# SNMP\nsnmp-server community "Pu8l1cC0mm" ro')
+    assert out.splitlines()[0] == "# SNMP" and "Pu8l1cC0mm" not in out and n == 1

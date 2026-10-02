@@ -88,5 +88,8 @@ def redact_config(text: str) -> tuple[str, int]:
             count[0] += 1
             out.append("<redacted: certificate or key block>")
             continue
+        if line.lstrip().startswith(("#", "!")):          # generated section headers and comments hold no secrets
+            out.append(line)
+            continue
         out.append(redact_line(line, count))
     return "\n".join(out), count[0]
