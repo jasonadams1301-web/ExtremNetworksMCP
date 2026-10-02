@@ -25,16 +25,16 @@ class Switch:
     platform: str
     site: str
     protocols: tuple[str, ...]
-    snmp_security: str = "authpriv"      # "authpriv" (default) or "noauth" (explicit per-switch opt-in)
+    snmp_security: str = "authpriv"      # "authpriv" (default), or an explicit per-switch opt-in: "authnopriv" / "noauth"
 
 
-SNMP_SECURITY = {"authpriv": "authpriv", "noauth": "noauth", "noauthnopriv": "noauth"}
+SNMP_SECURITY = {"authpriv": "authpriv", "authnopriv": "authnopriv", "noauth": "noauth", "noauthnopriv": "noauth"}
 
 
 def _snmp_security(raw, name: str) -> str:
     key = str(raw if raw is not None else "authpriv").lower().replace("-", "").replace("_", "").replace(" ", "")
     if key not in SNMP_SECURITY:
-        raise ValueError(f"switch {name}: snmp_security must be 'authpriv' or 'noauth', not {raw!r}")
+        raise ValueError(f"switch {name}: snmp_security must be 'authpriv', 'authnopriv' or 'noauth', not {raw!r}")
     return SNMP_SECURITY[key]
 
 
@@ -64,9 +64,9 @@ class Inventory:
         sw = self._by_name.get(name.lower()) if isinstance(name, str) else None
         return sw.management_ip if sw else None
 
-    def noauth_ips(self) -> set[str]:
-        """Management IPs explicitly marked snmp_security: noauth. Nothing else is ever queried without authPriv."""
-        return {s.management_ip for s in self._by_name.values() if s.snmp_security == "noauth"}
+    def snmp_levels(self) -> dict[str, str]:
+        """Management IP -> level for switches explicitly marked authnopriv/noauth. Everything else is authPriv."""
+        return {s.management_ip: s.snmp_security for s in self._by_name.values() if s.snmp_security != "authpriv"}
 
     def all(self) -> list[Switch]:
         return sorted(self._by_name.values(), key=lambda s: s.name)

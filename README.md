@@ -171,13 +171,13 @@ Settings (`/etc/extreme-mcp/extreme-mcp.env`, see `extreme-mcp.env.example`):
 | `SSH_MAX_PARALLEL` | `5` | Concurrent SSH sessions |
 
 Secrets are **not** in this file. They are systemd credentials named `snmp_username`, `snmp_auth_password`,
-`snmp_priv_password`, `snmp_noauth_username` (only for noauth switches), `ssh_username`, `ssh_password`. For local testing only, the upper-case names
+`snmp_priv_password`, `snmp_legacy_username` and `snmp_legacy_auth_password` (only for legacy-account switches), `ssh_username`, `ssh_password`. For local testing only, the upper-case names
 (`SNMP_USERNAME`, ...) are read from the environment.
 
-## Switches that only support SNMPv3 without authentication
+## Switches without an authPriv user (legacy SNMPv3 account)
 
-Every switch is queried with SNMPv3 **authPriv** by default. For a switch that has no authPriv user (only an SNMPv3
-no-auth user), mark it explicitly in the inventory:
+Every switch is queried with SNMPv3 **authPriv** by default. For a switch that only has a weaker SNMPv3 user, mark it
+explicitly in the inventory and give the server that switch's account (one shared "legacy" account for all such switches):
 
 ```yaml
   - name: older-switch-01
@@ -185,16 +185,23 @@ no-auth user), mark it explicitly in the inventory:
     platform: fabric
     mcp_enabled: true
     protocols: [snmpv3]
-    snmp_security: noauth        # noAuthNoPriv; the default is authpriv
+    snmp_security: authnopriv     # authenticated, not encrypted. Or: noauth (no password at all). Default: authpriv
 ```
 
-and store the no-auth username: `bash set-secret.sh snmp_noauth_username`, then uncomment the
-`LoadCredential=snmp_noauth_username:...` line in the systemd unit and restart.
+| `snmp_security` | Level | Credentials used |
+|---|---|---|
+| `authpriv` (default) | authenticated and encrypted | `snmp_username`, `snmp_auth_password`, `snmp_priv_password` |
+| `authnopriv` | authenticated, not encrypted | `snmp_legacy_username`, `snmp_legacy_auth_password` |
+| `noauth` | neither | `snmp_legacy_username` |
 
-This is a **per-switch opt-in, never an automatic fallback**: a switch left as authPriv that fails authentication is
-reported as an error and is never retried without authentication. noAuthNoPriv sends the username in clear text and the
-replies cannot be verified, so use it only for read-only users whose view is limited, and treat the data as
-unauthenticated (`list_switches` and `get_switch_health` show `snmp_security` for these switches).
+Store the secrets with `bash set-secret.sh snmp_legacy_username` and `bash set-secret.sh snmp_legacy_auth_password`, uncomment the
+two `LoadCredential=snmp_legacy_...` lines in the systemd unit, and restart. Set `SNMP_LEGACY_AUTH_PROTOCOL` (`md5`, `sha` or
+`sha256`, default `sha`) to match the switch; older switches often use MD5.
+
+This is a **per-switch opt-in, never an automatic fallback**: a switch left as authPriv that fails authentication is reported
+as an error and is never retried with weaker credentials. authNoPriv sends data unencrypted and noAuthNoPriv also sends the
+username in clear text and cannot verify replies, so use read-only users with a limited view, and treat the data as less
+trustworthy (`list_switches` and `get_switch_health` show `snmp_security` for these switches).
 
 ## Adding a switch
 

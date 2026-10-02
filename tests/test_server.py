@@ -240,11 +240,12 @@ def _write_inventory(tmp_path, extra=""):
 def test_inventory_defaults_to_authpriv_and_lists_only_opted_in_switches(tmp_path):
     inv = _Inv.load(_write_inventory(tmp_path))
     assert inv.resolve("modern").snmp_security == "authpriv" and inv.resolve("legacy").snmp_security == "noauth"
-    assert inv.noauth_ips() == {"192.0.2.31"}
+    assert inv.snmp_levels() == {"192.0.2.31": "noauth"}
 
 
 @pytest.mark.parametrize("value,ok", [("noauth", True), ("no-auth", True), ("noAuthNoPriv", True), ("authPriv", True),
-                                      ("auth_priv", True), ("none", False), ("authnopriv", False), ("v2c", False)])
+                                      ("auth_priv", True), ("authnopriv", True), ("auth-no-priv", True),
+                                      ("none", False), ("authprivileged", False), ("v2c", False)])
 def test_snmp_security_values_are_validated_at_load(tmp_path, value, ok):
     p = tmp_path / "i.yaml"
     p.write_text(f"switches:\n  - {{name: s1, management_ip: 192.0.2.40, mcp_enabled: true, protocols: [snmpv3], "
@@ -256,18 +257,19 @@ def test_snmp_security_values_are_validated_at_load(tmp_path, value, ok):
             _Inv.load(str(p))
 
 
-def _creds(monkeypatch, noauth="monitor"):
+def _creds(monkeypatch, noauth="monitor", legacy_pw="legacy-pass-98765"):
     for k in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"):
         monkeypatch.setenv(k, "value-for-test-12345")
-    if noauth:
-        monkeypatch.setenv("SNMP_NOAUTH_USERNAME", noauth)
-    else:
-        monkeypatch.delenv("SNMP_NOAUTH_USERNAME", raising=False)
+    for name, val in (("SNMP_LEGACY_USERNAME", noauth), ("SNMP_LEGACY_AUTH_PASSWORD", legacy_pw)):
+        if val:
+            monkeypatch.setenv(name, val)
+        else:
+            monkeypatch.delenv(name, raising=False)
 
 
 def test_opted_in_switch_uses_noauth_user_and_others_keep_authpriv(monkeypatch):
     _creds(monkeypatch)
-    c = SnmpClient(noauth_hosts={"192.0.2.31"})
+    c = SnmpClient(levels={"192.0.2.31": "noauth"})
     legacy, modern = c._user("192.0.2.31"), c._user("192.0.2.30")
     assert str(legacy.userName) == "monitor" and legacy.security_level == "noAuthNoPriv"
     assert str(modern.userName) == "value-for-test-12345" and modern.security_level == "authPriv"
@@ -278,15 +280,15 @@ def test_switch_not_opted_in_never_gets_noauth_even_when_the_credential_exists(m
     for k in ("SNMP_AUTH_PASSWORD",):                       # authPriv credentials incomplete -> error, no downgrade
         monkeypatch.delenv(k)
     with pytest.raises(SnmpError, match="not configured"):
-        SnmpClient(noauth_hosts={"192.0.2.31"})._user("192.0.2.30")
+        SnmpClient(levels={"192.0.2.31": "noauth"})._user("192.0.2.30")
     with pytest.raises(SnmpError, match="not configured"):
         SnmpClient()._user("192.0.2.30")
 
 
 def test_noauth_switch_without_a_configured_username_is_an_error(monkeypatch):
     _creds(monkeypatch, noauth=None)
-    with pytest.raises(SnmpError, match="noAuthNoPriv username is not configured"):
-        SnmpClient(noauth_hosts={"192.0.2.31"})._user("192.0.2.31")
+    with pytest.raises(SnmpError, match="legacy account username is not configured"):
+        SnmpClient(levels={"192.0.2.31": "noauth"})._user("192.0.2.31")
 
 
 async def test_noauth_switch_is_marked_in_list_and_health(tmp_path, monkeypatch):
@@ -304,3 +306,56 @@ async def test_noauth_switch_is_marked_in_list_and_health(tmp_path, monkeypatch)
     health = json.loads((await mcp.call_tool("get_switch_health", {"switch": "legacy"}))[0].text)
     assert health["snmp_security"] == "noauth" and "unauthenticated" in health["security_note"]
     assert "security_note" not in json.loads((await mcp.call_tool("get_switch_health", {"switch": "modern"}))[0].text)
+
+
+# ---------------- authNoPriv legacy account (authenticated, not encrypted) ----------------
+def test_authnopriv_switch_uses_legacy_user_with_its_own_password(monkeypatch):
+    _creds(monkeypatch)
+    c = SnmpClient(levels={"192.0.2.31": "authnopriv"})
+    u = c._user("192.0.2.31")
+    assert str(u.userName) == "monitor" and u.security_level == "authNoPriv"
+    assert u.authentication_key is not None and u.privacy_key is None
+    assert c._user("192.0.2.30").security_level == "authPriv"               # other switches unaffected
+
+
+@pytest.mark.parametrize("proto", ["md5", "sha", "sha256", "MD5"])
+def test_legacy_auth_protocol_is_selectable(monkeypatch, proto):
+    _creds(monkeypatch)
+    monkeypatch.setenv("SNMP_LEGACY_AUTH_PROTOCOL", proto)
+    assert SnmpClient(levels={"192.0.2.31": "authnopriv"})._user("192.0.2.31").security_level == "authNoPriv"
+
+
+def test_unknown_legacy_auth_protocol_is_a_clear_error(monkeypatch):
+    _creds(monkeypatch)
+    monkeypatch.setenv("SNMP_LEGACY_AUTH_PROTOCOL", "rot13")
+    with pytest.raises(SnmpError, match="unknown auth protocol"):
+        SnmpClient(levels={"192.0.2.31": "authnopriv"})._user("192.0.2.31")
+
+
+def test_authnopriv_without_a_password_is_an_error_and_never_downgrades_to_noauth(monkeypatch):
+    _creds(monkeypatch, legacy_pw=None)
+    with pytest.raises(SnmpError, match="legacy account auth password is not configured"):
+        SnmpClient(levels={"192.0.2.31": "authnopriv"})._user("192.0.2.31")
+
+
+def test_legacy_credentials_do_not_apply_to_authpriv_switches(monkeypatch):
+    _creds(monkeypatch)
+    monkeypatch.delenv("SNMP_PRIV_PASSWORD")
+    with pytest.raises(SnmpError, match="not configured"):
+        SnmpClient(levels={"192.0.2.31": "authnopriv"})._user("192.0.2.30")
+
+
+async def test_authnopriv_switch_is_marked_in_list_and_health(tmp_path):
+    p = tmp_path / "i.yaml"
+    p.write_text("switches:\n  - {name: older, management_ip: 192.0.2.60, mcp_enabled: true, protocols: [snmpv3], "
+                 "snmp_security: authnopriv}\n", encoding="utf-8")
+    inv = _Inv.load(str(p))
+    assert inv.snmp_levels() == {"192.0.2.60": "authnopriv"}
+
+    class S(FakeSnmp):
+        async def get(self, ip, oids):
+            return {o: "x" for o in oids}
+
+    mcp = build_server(inv, S(), Audit(None))
+    health = json.loads((await mcp.call_tool("get_switch_health", {"switch": "older"}))[0].text)
+    assert health["snmp_security"] == "authnopriv" and "authenticated, not encrypted" in health["security_note"]

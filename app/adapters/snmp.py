@@ -9,7 +9,7 @@ from pysnmp.hlapi.v3arch.asyncio import (
     ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget, UsmUserData,
     bulk_walk_cmd, get_cmd,
     usmAesCfb128Protocol, usmAesCfb256Protocol,
-    usmHMACSHAAuthProtocol, usmHMAC192SHA256AuthProtocol,
+    usmHMACMD5AuthProtocol, usmHMACSHAAuthProtocol, usmHMAC192SHA256AuthProtocol,
 )
 
 from app.secrets import get_secret
@@ -24,7 +24,7 @@ ALLOWED_PREFIXES = (
     "1.3.6.1.4.1.1916.",    # Extreme enterprise (Switch Engine / EXOS)
     "1.3.6.1.4.1.2272.",    # Rapid City enterprise (Fabric Engine / VOSS)
 )
-AUTH = {"sha": usmHMACSHAAuthProtocol, "sha256": usmHMAC192SHA256AuthProtocol}
+AUTH = {"md5": usmHMACMD5AuthProtocol, "sha": usmHMACSHAAuthProtocol, "sha256": usmHMAC192SHA256AuthProtocol}
 PRIV = {"aes": usmAesCfb128Protocol, "aes256": usmAesCfb256Protocol}
 
 
@@ -39,28 +39,43 @@ def check_oid(oid: str) -> str:
     return oid
 
 
+def _proto(table: dict, name: str, what: str):
+    try:
+        return table[name.lower()]
+    except KeyError:
+        raise SnmpError(f"unknown {what} protocol {name!r}; choose from {', '.join(sorted(table))}") from None
+
+
 class SnmpClient:
-    def __init__(self, noauth_hosts=None):
-        self.noauth_hosts = frozenset(noauth_hosts or ())       # IPs explicitly opted in to noAuthNoPriv
+    def __init__(self, levels: dict[str, str] | None = None):
+        # ip -> "noauth" | "authnopriv" for switches the inventory explicitly opts in. Everything else is authPriv.
+        self.levels = dict(levels or {})
         self.timeout = int(os.environ.get("SNMP_TIMEOUT_SECONDS", "5"))
         self.retries = int(os.environ.get("SNMP_RETRIES", "1"))
         self.engine = SnmpEngine()
 
     def _user(self, ip: str | None = None) -> UsmUserData:
-        if ip is not None and ip in self.noauth_hosts:
-            # noAuthNoPriv: no authentication or encryption. Only for switches the inventory explicitly marks
-            # snmp_security: noauth; a failed authPriv query never falls back to this.
-            user = get_secret("SNMP_NOAUTH_USERNAME")
+        level = self.levels.get(ip, "authpriv") if ip is not None else "authpriv"
+        if level in ("noauth", "authnopriv"):
+            # Legacy account for switches without an authPriv user. Only used for switches the inventory explicitly marks
+            # with snmp_security; a failed authPriv query never falls back to this.
+            user = get_secret("SNMP_LEGACY_USERNAME")
             if not user:
-                raise SnmpError("SNMPv3 noAuthNoPriv username is not configured")
-            return UsmUserData(user)
+                raise SnmpError("SNMPv3 legacy account username is not configured")
+            if level == "noauth":
+                return UsmUserData(user)                                    # noAuthNoPriv
+            pw = get_secret("SNMP_LEGACY_AUTH_PASSWORD")
+            if not pw:
+                raise SnmpError("SNMPv3 legacy account auth password is not configured")
+            return UsmUserData(user, authKey=pw,                           # authNoPriv
+                               authProtocol=_proto(AUTH, os.environ.get("SNMP_LEGACY_AUTH_PROTOCOL", "sha"), "auth"))
         user, auth, priv = (get_secret(n) for n in ("SNMP_USERNAME", "SNMP_AUTH_PASSWORD", "SNMP_PRIV_PASSWORD"))
         if not (user and auth and priv):  # authPriv needs all three; never downgrade
             raise SnmpError("SNMPv3 credentials are not configured")
         return UsmUserData(
             user, authKey=auth, privKey=priv,
-            authProtocol=AUTH[os.environ.get("SNMP_AUTH_PROTOCOL", "sha")],
-            privProtocol=PRIV[os.environ.get("SNMP_PRIV_PROTOCOL", "aes")],
+            authProtocol=_proto(AUTH, os.environ.get("SNMP_AUTH_PROTOCOL", "sha"), "auth"),
+            privProtocol=_proto(PRIV, os.environ.get("SNMP_PRIV_PROTOCOL", "aes"), "privacy"),
         )
 
     async def _target(self, ip: str):

@@ -66,10 +66,13 @@ async def get_switch_health(inv: Inventory, snmp: SnmpClient, switch: str) -> di
     descr, uptime, name, loc = (v[f"{SYS}.{i}.0"] for i in (1, 3, 5, 6))
     out = {"switch": sw.name, "sysName": name, "sysDescr": descr, "sysLocation": loc,
            "uptime": _uptime(uptime), "uptime_ticks": uptime}
-    if sw.snmp_security == "noauth":
-        out["snmp_security"] = "noauth"
-        out["security_note"] = ("this switch is queried with SNMPv3 noAuthNoPriv (no authentication or encryption); "
-                                "treat its SNMP data as unauthenticated")
+    if sw.snmp_security != "authpriv":
+        out["snmp_security"] = sw.snmp_security
+        out["security_note"] = {
+            "noauth": "this switch is queried with SNMPv3 noAuthNoPriv (no authentication or encryption); "
+                      "treat its SNMP data as unauthenticated",
+            "authnopriv": "this switch is queried with SNMPv3 authNoPriv (authenticated, not encrypted); "
+                          "its data is authenticated but readable on the network"}[sw.snmp_security]
     if sw.platform != "fabric":
         out["note"] = "CPU, memory, temperature and power detail is only implemented for Fabric Engine"
         return out
