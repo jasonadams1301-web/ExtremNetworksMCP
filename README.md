@@ -112,6 +112,18 @@ Code is installed root-owned under `/opt/extreme-mcp`, config under `/etc/extrem
 4. Uncomment the two `LoadCredential=ssh_*` lines in `extreme-mcp.service`, set `SSH_ENABLED=true` in
    `/etc/extreme-mcp/extreme-mcp.env`, add `ssh` to each switch's `protocols`, then `daemon-reload` and restart.
 
+**Recording a switch's host key.** Add each switch's key to `/etc/extreme-mcp/known_hosts` and verify the fingerprint on
+the switch. If `ssh-keyscan` fails (older switches offer only legacy key exchange), use the bundled helper, which uses the
+same SSH library as the server:
+
+```
+/opt/extreme-mcp/venv/bin/python /opt/extreme-mcp/scan-host-key.py <switch-ip> | sudo tee -a /etc/extreme-mcp/known_hosts
+```
+
+**Older switches.** The SSH library accepts `diffie-hellman-group14-sha1` as a last-resort key exchange, so switches whose
+SSH server offers nothing newer still work. Host keys are still verified against `known_hosts`. Modern switches negotiate
+stronger algorithms automatically.
+
 Fabric Engine does not run one-off commands over an SSH exec channel, so each call opens an interactive CLI session,
 sends only the fixed `show` command, answers the `--More--` pager, and closes. The switch may authenticate each
 login separately (for example via RADIUS).
@@ -185,7 +197,7 @@ install.sh, set-secret.sh, extreme-mcp.service, *.example   deployment files
 
 ## Verified against
 
-Fabric Engine 9.3 on 5420M switches (SNMPv3 authPriv and SSH). CPU and memory use the Rapid City MIB
+Fabric Engine 9.3 on 5420M switches and a VSP 7400 (SNMPv3 authPriv and SSH). CPU and memory use the Rapid City MIB
 (`rcKhiSlotCpuCurrentUtil`, `rcKhiSlotMemUtil`); other vendor OIDs are documented in `app/tools/switches.py`.
 Other platforms and releases may differ, so check the SNMP OIDs and `show` commands on your own hardware.
 

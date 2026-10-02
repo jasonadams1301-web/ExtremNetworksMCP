@@ -14,6 +14,7 @@ sudo install -d -o root -g root -m 700 /etc/extreme-mcp/credentials
 sudo python3 -m venv /opt/extreme-mcp/venv
 sudo /opt/extreme-mcp/venv/bin/pip install -q -r requirements.txt
 sudo cp -r app /opt/extreme-mcp/
+sudo install -o root -g root -m 755 scan-host-key.py /opt/extreme-mcp/scan-host-key.py
 sudo chown -R root:root /opt/extreme-mcp/app
 
 [ -f /etc/extreme-mcp/extreme-mcp.env ] || sudo install -o root -g extreme-mcp -m 640 extreme-mcp.env.example /etc/extreme-mcp/extreme-mcp.env
