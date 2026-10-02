@@ -9,8 +9,8 @@ from app.validation import Inventory
 SPBM_ROW = re.compile(r"^(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(enable|disable)\s+(enable|disable)\s+(enable|disable)\s+"
                       r"(enable|disable)\s+(\S+)\s+(enable|disable)\s+(\S+)\s*$")
 SYSID_ROW = re.compile(r"^([0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4})\s+(\S+)(?:\s+(.+?))?\s*$")
-ISIS_IF_ROW = re.compile(r"^(\S+)\s+(\S+)\s+Level (\d)\s+(UP|DOWN)\s+(UP|DOWN)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+"
-                         r"(\S+)\s+(\S+)(?:\s+(.+?))?\s*$")
+ISIS_IF_ROW = re.compile(r"^(\S+)\s+(\S+)\s+Level (\d)\s+(UP|DOWN)\s+(UP|DOWN)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+\(A\))?\s+"
+                         r"(\d+)\s+(\S+)\s+(\S+)(?:\s+(.+?))?\s*$")
 ISIS_IF_HINT = re.compile(r"^\S+\s+(pt-pt|bcast)\s+Level\s")
 ADJ_SUMMARY = re.compile(r"(\d+) out of (\d+) interfaces have formed an adjacency")
 STP_A = re.compile(r"^(\d+)\s+([0-9A-Fa-f:]{17})\s+(\d+)\s+(\S+)\s+(\d+)\s*$")

@@ -5,13 +5,11 @@ import re
 
 from app.adapters.ssh import VRF_NAME, SshClient
 from app.tools.ssh_tools import MAX_LINES, _fabric_ssh
-from app.tools.tables import body_lines
+from app.tools.tables import body_lines, column_starts, slice_row
 from app.validation import Inventory, ValidationError
 
 IFACE_ROW = re.compile(r"^(\S+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+(enable|disable)\s+(up|down)\s+"
                        r"(\S+)\s+(\S+)\s+(\S+)(?:\s+(.+?))?\s*$")
-ROUTE_ROW = re.compile(r"^(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+"
-                       r"(\S+)\s+(\d+)\s*$")
 ROUTE_HINT = re.compile(r"^\d+\.\d+\.\d+\.\d+\s+\d+\.\d+\.\d+\.\d+\s")
 IFACE_HINT = re.compile(r"^\S+\s+\d+\.\d+\.\d+\.\d+\s+\d+\.\d+\.\d+\.\d+\s")
 TITLE = re.compile(r"IP (?:Interface|Route) - (\S+)")
@@ -33,19 +31,29 @@ def parse_interfaces(text: str) -> tuple[list[dict], list[str], str | None]:
     return rows, bad, title.group(1) if title else None
 
 
+ROUTE_COLS = ["DST", "MASK", "NEXT", "VRF/ISID", "COST", "FACE", "PROT", "AGE", "TYPE", "PRF"]
+
+
 def parse_routes(text: str) -> tuple[list[dict], list[str], str | None]:
+    """Fixed-width read: the NEXT column holds a host name (which can contain spaces) for fabric-learned routes."""
+    lines = body_lines(text)
+    head = next((i for i, ln in enumerate(lines) if ln.startswith("DST ") and "NEXT" in ln), None)
     rows, bad = [], []
-    for ln in body_lines(text):
-        m = ROUTE_ROW.match(ln.strip())
-        if m:
-            net = ipaddress.IPv4Network(f"{m.group(1)}/{m.group(2)}", strict=False)
-            rows.append({"network": str(net), "prefix_length": net.prefixlen, "next_hop": m.group(3),
-                         "next_hop_vrf": None if m.group(4) == "-" else m.group(4), "cost": int(m.group(5)),
-                         "interface": m.group(6), "protocol": m.group(7), "age": int(m.group(8)),
-                         "flags": m.group(9), "preference": int(m.group(10))})
-        elif ROUTE_HINT.match(ln.strip()):
-            bad.append(ln.strip())
     title = TITLE.search(text)
+    if head is None:
+        return rows, bad, title.group(1) if title else None
+    st = column_starts(lines[head], ROUTE_COLS)
+    for ln in lines[head + 1:]:
+        if not ROUTE_HINT.match(ln.strip()):
+            continue
+        c = slice_row(ln, st)
+        try:
+            net = ipaddress.IPv4Network(f"{c[0]}/{c[1]}", strict=False)
+            rows.append({"network": str(net), "prefix_length": net.prefixlen, "next_hop": c[2],
+                         "next_hop_vrf": None if c[3] == "-" else c[3], "cost": int(c[4]), "interface": c[5],
+                         "protocol": c[6], "age": int(c[7]), "flags": c[8], "preference": int(c[9])})
+        except (ValueError, IndexError):
+            bad.append(ln.strip())
     return rows, bad, title.group(1) if title else None
 
 

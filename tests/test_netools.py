@@ -401,3 +401,35 @@ async def test_port_summary_rejects_unknown_switch_and_uses_platform_port_format
         await server(inv, snmp=snmp).call_tool("get_port_summary", {"switch": "198.51.100.9"})
     out = await call(server(inv, snmp=PortSnmp()), "get_port_summary", switch="exos1")
     assert out["parse_warnings"] == ["no physical ports recognised in the interface table"]   # '1/1' is not an EXOS port
+
+
+# ---------------- layout variants seen on a switch with fabric-learned routes ----------------
+ROUTE_HEAD = rule("IP Route - GlobalRouter") + (
+    "                                                     NH                      INTER   \n"
+    "DST             MASK            NEXT                 VRF/ISID         COST   FACE     PROT AGE TYPE   PRF\n") + DASH
+ROUTE_NAMED = BANNER + ROUTE_HEAD + (
+    route_row("192.0.2.3", "255.255.255.255", "Site A - Core 1", "GlobalRouter", 1, 4051, "ISIS", 0, "IBSE", 7)
+    + route_row("192.0.2.3", "255.255.255.255", "Site A - Core 1", "GlobalRouter", 1, 4052, "ISIS", 0, "IBSE", 7)
+    + route_row("198.51.100.0", "255.255.255.0", "198.51.100.1", "-", 1, 10, "LOC", 0, "DB", 0)
+    + "3 out of 3 Total Num of Route Entries, 2 Total Num of Dest Networks displayed.\n")
+
+
+def test_routes_with_a_hostname_next_hop_that_contains_spaces():
+    routes, bad, _ = parse_routes(ROUTE_NAMED)
+    assert not bad and len(routes) == 3
+    assert routes[0]["next_hop"] == "Site A - Core 1" and routes[0]["interface"] == "4051" and routes[0]["flags"] == "IBSE"
+    assert routes[2]["next_hop"] == "198.51.100.1" and routes[2]["next_hop_vrf"] is None
+
+
+async def test_get_routing_reports_a_named_next_hop_without_warnings(inv):
+    out = await call(server(inv, FakeSsh({"ip_route": ROUTE_NAMED})), "get_routing", switch="fab1", destination="192.0.2.3")
+    assert out["lookup"]["result"] == "192.0.2.3/32 via Site A - Core 1 on interface 4051 (ISIS)"
+    assert "parse_warnings" not in out and out["route_protocols"] == {"ISIS": 2, "LOC": 1}
+
+
+def test_isis_interface_rows_with_the_auto_metric_marker():
+    row = (f"{'Port1/48':<18}{'pt-pt':<8}{'Level 1':<10}{'UP':<8}{'UP':<8}{1:<7}{1:<8}{'2000 (A)':<13}{2000:<13}"
+           f"{'AUTO-SENSE':<11}{'HOME'}\n")
+    ifs, bad = parse_isis_interfaces(ISIS_IF.replace("Legend:", row + "Legend:"))
+    assert not bad and [i["interface"] for i in ifs] == ["SiteA", "SiteB", "Core1", "Port1/48"]
+    assert ifs[3]["metric"] == 2000 and ifs[3]["origin"] == "AUTO-SENSE" and ifs[3]["oper"] == "UP"
