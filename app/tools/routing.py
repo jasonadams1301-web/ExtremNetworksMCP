@@ -16,17 +16,32 @@ TITLE = re.compile(r"IP (?:Interface|Route) - (\S+)")
 PROTOCOLS = ("LOC", "STAT", "ISIS", "OSPF", "BGP", "RIP", "SPBM")
 
 
+IFACE_ROW_NOSTATUS = re.compile(r"^(\S+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+"
+                                r"(\S+)\s+(\S+)(?:\s+(.+?))?\s*$")
+ROUTE_FROM_RIGHT = re.compile(r"^(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+(.+?)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+"
+                              r"(\d+)\s+(\S+)\s+(\d+)\s*$")
+
+
 def parse_interfaces(text: str) -> tuple[list[dict], list[str], str | None]:
+    """Two layouts exist: one with ADMIN/OPER status columns, and one (some models) without status."""
     rows, bad = [], []
     for ln in body_lines(text):
-        m = IFACE_ROW.match(ln.strip())
+        s = ln.strip()
+        m = IFACE_ROW.match(s)
         if m:
             net = ipaddress.IPv4Network(f"{m.group(2)}/{m.group(3)}", strict=False)
             rows.append({"interface": m.group(1), "ip": m.group(2), "mask": m.group(3), "prefix_length": net.prefixlen,
                          "admin": m.group(4), "oper": m.group(5), "vlan": None if m.group(6) in ("--", "-") else m.group(6),
                          "brouter_port": m.group(7), "name": m.group(9)})
-        elif IFACE_HINT.match(ln.strip()):
-            bad.append(ln.strip())
+            continue
+        m = IFACE_ROW_NOSTATUS.match(s)
+        if m and not re.fullmatch(r"enable|disable", m.group(4)):
+            net = ipaddress.IPv4Network(f"{m.group(2)}/{m.group(3)}", strict=False)
+            rows.append({"interface": m.group(1), "ip": m.group(2), "mask": m.group(3), "prefix_length": net.prefixlen,
+                         "admin": None, "oper": None, "vlan": None if m.group(6) in ("--", "-") else m.group(6),
+                         "brouter_port": m.group(7), "name": m.group(9)})
+        elif IFACE_HINT.match(s):
+            bad.append(s)
     title = TITLE.search(text)
     return rows, bad, title.group(1) if title else None
 
@@ -53,7 +68,15 @@ def parse_routes(text: str) -> tuple[list[dict], list[str], str | None]:
                          "next_hop_vrf": None if c[3] == "-" else c[3], "cost": int(c[4]), "interface": c[5],
                          "protocol": c[6], "age": int(c[7]), "flags": c[8], "preference": int(c[9])})
         except (ValueError, IndexError):
-            bad.append(ln.strip())
+            m = ROUTE_FROM_RIGHT.match(ln.strip())      # next-hop name wider than its column shifts the fixed columns
+            if not m:
+                bad.append(ln.strip())
+                continue
+            net = ipaddress.IPv4Network(f"{m.group(1)}/{m.group(2)}", strict=False)
+            rows.append({"network": str(net), "prefix_length": net.prefixlen, "next_hop": m.group(3),
+                         "next_hop_vrf": None if m.group(4) == "-" else m.group(4), "cost": int(m.group(5)),
+                         "interface": m.group(6), "protocol": m.group(7), "age": int(m.group(8)),
+                         "flags": m.group(9), "preference": int(m.group(10))})
     return rows, bad, title.group(1) if title else None
 
 

@@ -4,7 +4,7 @@ import re
 
 from app.adapters.ssh import SshClient
 from app.tools.ssh_tools import CONTAINS_RE, MAX_LINES, _fabric_ssh
-from app.tools.tables import body_lines, column_starts, count_ports, slice_row
+from app.tools.tables import body_lines, column_starts, columns_present, count_ports, slice_named, slice_row
 from app.validation import Inventory, ValidationError
 
 BASIC_COLS = ["ID", "NAME", "TYPE", "INST_ID", "PROTOCOLID", "SUBNETADDR", "SUBNETMASK", "VRFID", "ORIGIN"]
@@ -17,12 +17,13 @@ def parse_basic(text: str) -> dict[int, dict]:
     head = next((i for i, ln in enumerate(lines) if ln.startswith("ID ") and "NAME" in ln), None)
     if head is None:
         return out
-    st = column_starts(lines[head], BASIC_COLS)
+    cols = columns_present(lines[head], BASIC_COLS)            # ORIGIN (and others) are absent on some models
     for ln in lines[head + 1:]:
         if re.match(r"^\d+\s", ln):
-            c = slice_row(ln, st)
-            out[int(c[0])] = {"vlan": int(c[0]), "name": c[1], "type": c[2], "vrf_id": int(c[7]) if c[7].isdigit() else None,
-                              "origin": c[8]}
+            c = slice_named(ln, cols)
+            out[int(c["ID"])] = {"vlan": int(c["ID"]), "name": c.get("NAME", ""), "type": c.get("TYPE"),
+                                 "vrf_id": int(c["VRFID"]) if c.get("VRFID", "").isdigit() else None,
+                                 "origin": c.get("ORIGIN")}
     return out
 
 
@@ -51,13 +52,14 @@ def parse_isid(text: str) -> dict[int, dict]:
     head = next((i for i, ln in enumerate(lines) if ln.startswith("VLAN_ID")), None)
     if head is None:
         return out
-    st = column_starts(lines[head], ISID_COLS)
+    cols = columns_present(lines[head], ISID_COLS)             # 'VLAN NAME' is absent on some models
     for ln in lines[head + 1:]:
-        if re.match(r"^\d+ out of \d+", ln):          # footer such as '12 out of 12 Total Num of Vlans displayed'
+        if re.match(r"^\d+ out of \d+", ln):                  # footer such as '12 out of 12 Total Num of Vlans displayed'
             continue
         if re.match(r"^\d+\s", ln) or re.match(r"^\d+$", ln.strip()):
-            c = slice_row(ln, st)
-            out[int(c[0])] = {"i_sid": int(c[1]) if c[1].isdigit() else None, "i_sid_name": c[3] or None}
+            c = slice_named(ln, cols)
+            out[int(c["VLAN_ID"])] = {"i_sid": int(c["I-SID"]) if c.get("I-SID", "").isdigit() else None,
+                                      "i_sid_name": c.get("I-SID NAME") or None}
     return out
 
 

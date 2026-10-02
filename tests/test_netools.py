@@ -433,3 +433,69 @@ def test_isis_interface_rows_with_the_auto_metric_marker():
     ifs, bad = parse_isis_interfaces(ISIS_IF.replace("Legend:", row + "Legend:"))
     assert not bad and [i["interface"] for i in ifs] == ["SiteA", "SiteB", "Core1", "Port1/48"]
     assert ifs[3]["metric"] == 2000 and ifs[3]["origin"] == "AUTO-SENSE" and ifs[3]["oper"] == "UP"
+
+
+# ---------------- layout variants seen on a newer switch model (VSP 7400) ----------------
+def basic_row_noorigin(vid, name, typ="byPort", inst=0, vrf=0):
+    return f"{vid:<6}{name:<17}{typ:<13}{inst:<8}{'none':<13}{'N/A':<16}{'N/A':<16}{vrf:<6}\n"
+
+
+VLAN_BASIC_NOORIGIN = BANNER + rule("Vlan Basic") + (
+    f"{'VLAN':<36}{'MSTP':<7}\n" + f"{'ID':<6}{'NAME':<17}{'TYPE':<13}{'INST_ID':<8}{'PROTOCOLID':<13}{'SUBNETADDR':<16}"
+    f"{'SUBNETMASK':<16}{'VRFID':<6}\n") + DASH + basic_row_noorigin(1, "Default") + \
+    basic_row_noorigin(150, "Secure Servers") + basic_row_noorigin(4051, "VLAN-4051", "spbm-bvlan", 62) + \
+    "All 3 out of 3 Total Num of Vlans displayed\n"
+VLAN_ISID_NONAME = BANNER + rule("Vlan I-SID") + (f"{'VLAN_ID':<11}{'I-SID':<21}{'I-SID NAME':<32}\n") + DASH + \
+    f"{1:<11}\n" + f"{150:<11}{'274150':<21}{'ISID-274150':<32}\n" + f"{4051:<11}\n" + \
+    "3 out of 3 Total Num of Vlans displayed\n"
+VLAN_MEMBERS_NEW = BANNER + rule("Vlan Port") + (
+    f"{'VLAN':<5}{'PORT':<19}{'ACTIVE':<19}{'STATIC':<19}{'NOT_ALLOW':<10}\n"
+    f"{'ID':<5}{'MEMBER':<19}{'MEMBER':<19}{'MEMBER':<19}{'MEMBER':<10}\n") + DASH + member_row(1) + \
+    member_row(150, "1/3-1/4,1/7-1/8,", "1/3-1/4,1/7-1/8,") + member_row("", "1/11-1/12,1/15-", "1/11-1/12,1/15-") + \
+    member_row("", "1/16", "1/16") + member_row(4051, "1/53", "1/53") + "All 3 out of 3 Total Num of Port Entries displayed\n"
+IP_IF_NOSTATUS = BANNER + rule("IP Interface - GlobalRouter") + (
+    "INTERFACE    IP             NET            BCASTADDR  REASM    VLAN  BROUTER    IPSEC   IP\n"
+    "             ADDRESS        MASK           FORMAT     MAXSIZE  ID    PORT       STATE   NAME\n") + DASH + (
+    "Clip1        192.0.2.74     255.255.255.255 ones       1500     --    false      disable\n"
+    "Vlan20       198.51.100.9   255.255.255.0   ones       1500     20    false      disable   mgmt\n"
+    "All 2 out of 2 Total Num of IP interfaces displayed\n")
+ROUTE_OVERFLOW = BANNER + ROUTE_HEAD + (
+    route_row("192.0.2.3", "255.255.255.255", "Some-Really-Long-Core-Switch-Name ", "GlobalRouter", 1, 4051, "ISIS", 0, "IBS", 7)
+    + route_row("198.51.100.0", "255.255.255.0", "198.51.100.1", "-", 1, 10, "LOC", 0, "DB", 0)
+    + "2 out of 2 Total Num of Route Entries, 2 Total Num of Dest Networks displayed.\n")
+
+
+def test_vlan_tables_without_origin_and_vlan_name_columns():
+    basic = parse_basic(VLAN_BASIC_NOORIGIN)
+    assert basic[150]["name"] == "Secure Servers" and basic[150]["origin"] is None and basic[4051]["type"] == "spbm-bvlan"
+    isid = parse_isid(VLAN_ISID_NONAME)
+    assert isid[150] == {"i_sid": 274150, "i_sid_name": "ISID-274150"} and isid[4051]["i_sid"] is None and len(isid) == 3
+    members = parse_members(VLAN_MEMBERS_NEW)
+    assert members[150]["ports"] == "1/3-1/4,1/7-1/8,1/11-1/12,1/15-1/16"          # wrapped mid-range joins back up
+    assert count_ports(members[150]["ports"]) == 2 + 2 + 2 + 2
+
+
+async def test_get_vlans_on_the_newer_model(inv):
+    ssh = FakeSsh({"vlan_basic": VLAN_BASIC_NOORIGIN, "vlan_members": VLAN_MEMBERS_NEW, "vlan_isid": VLAN_ISID_NONAME})
+    out = await call(server(inv, ssh), "get_vlans", switch="fab1", vlan=150)
+    assert out["matched"] == 1 and out["vlans"][0]["i_sid"] == 274150 and out["vlans"][0]["port_count"] == 8
+    assert "parse_warnings" not in out
+
+
+def test_ip_interface_layout_without_status_columns():
+    ifs, bad, router = parse_interfaces(IP_IF_NOSTATUS)
+    assert not bad and router == "GlobalRouter" and [i["interface"] for i in ifs] == ["Clip1", "Vlan20"]
+    assert ifs[1]["ip"] == "198.51.100.9" and ifs[1]["prefix_length"] == 24 and ifs[1]["vlan"] == "20" and ifs[1]["name"] == "mgmt"
+    assert ifs[0]["admin"] is None and ifs[0]["oper"] is None and ifs[0]["vlan"] is None
+
+
+async def test_get_routing_without_interface_status_does_not_invent_down_interfaces(inv):
+    out = await call(server(inv, FakeSsh({"ip_interface": IP_IF_NOSTATUS})), "get_routing", switch="fab1")
+    assert len(out["ip_interfaces"]) == 2 and out["interfaces_down"] == [] and "parse_warnings" not in out
+
+
+def test_route_with_a_next_hop_name_wider_than_its_column():
+    routes, bad, _ = parse_routes(ROUTE_OVERFLOW)
+    assert not bad and len(routes) == 2
+    assert routes[0]["next_hop"] == "Some-Really-Long-Core-Switch-Name" and routes[0]["interface"] == "4051"
+    assert routes[0]["protocol"] == "ISIS" and routes[0]["flags"] == "IBS" and routes[0]["preference"] == 7

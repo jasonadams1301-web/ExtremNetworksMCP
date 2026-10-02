@@ -22,6 +22,22 @@ def column_starts(header: str, names: list[str]) -> list[int]:
     return starts
 
 
+def columns_present(header: str, names: list[str]) -> list[tuple[str, int]]:
+    """(name, start) for the columns that exist in this header, in order. Newer/older models drop or add columns."""
+    cols, pos = [], 0
+    for name in names:
+        i = header.find(name, pos)
+        if i >= 0:
+            cols.append((name, i))
+            pos = i + len(name)
+    return cols
+
+
+def slice_named(line: str, cols: list[tuple[str, int]]) -> dict[str, str]:
+    starts = [st for _, st in cols]
+    return dict(zip([n for n, _ in cols], slice_row(line, starts)))
+
+
 def slice_row(line: str, starts: list[int]) -> list[str]:
     cells = []
     for i, st in enumerate(starts):
