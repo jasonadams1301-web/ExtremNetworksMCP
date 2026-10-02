@@ -26,9 +26,13 @@ It can look. It cannot change anything.
 | `get_dhcp_leases` | SSH | Fabric Engine | Leases (IP, MAC, last transaction, expiry), newest first; filter by subnet or IP/MAC fragment |
 | `get_dhcp_relay` | SSH | Fabric Engine | Relay interfaces with request/reply counters and configured servers; flags interfaces with requests but no replies |
 | `get_dhcp_server_log` | SSH | Fabric Engine | Newest DHCP server log entries; filter by level or text; routine polling hidden |
+| `get_port_summary` | SNMPv3 | all | Every physical port: state (up / down / admin_down), speed, error and discard counters, time since last change; filter by state, errors, or "changed in the last N minutes" |
+| `get_vlans` | SSH | Fabric Engine | VLANs with name, type, I-SID and port members; filter by VLAN id or name |
+| `get_routing` | SSH | Fabric Engine | IP interfaces (flags down ones), route table, default route, and the route the switch would use for a given destination |
+| `get_fabric_status` | SSH | Fabric Engine | SPB / IS-IS system, interfaces up or down, adjacencies, spanning-tree topology-change counters |
+| `get_auth_status` | SSH | Fabric Engine | 802.1X client counts and RADIUS reachability (credential fields hidden) |
 | `get_system_info` | SSH | Fabric Engine | `show sys-info` output |
 | `get_fabric_adjacencies` | SSH | Fabric Engine | IS-IS (SPB) adjacencies |
-| `get_interface_detail` | SSH | Fabric Engine | Interface, statistics and error output for one port |
 | `get_arp_table` | SSH | Fabric Engine | ARP table (IP, MAC, VLAN, port, type, TTL); filter by IP/MAC fragment, subnet, VLAN, port, type or VRF |
 | `find_mac_address` | SSH | Fabric Engine | Where a MAC address is in the forwarding table |
 
@@ -189,6 +193,8 @@ Other platforms and releases may differ, so check the SNMP OIDs and `show` comma
 
 - Fan speed and status are not exposed over SNMP on the tested platform. Only installed fan trays are listed.
 - Switch Engine (EXOS) has no SSH tools yet, and only basic fields from `get_switch_health`.
+- Stack health, LACP/MLT detail, fibre-optic (transceiver) levels and per-port CLI statistics are not available: the
+  read-only account cannot run `show interfaces ...` on the tested release. Per-port state and errors come from SNMP.
 - Stack health is not implemented. The DHCP server log is a short rolling window and can lag the switch clock.
 - One shared SNMPv3 credential set and one shared SSH account for all switches.
 - Log search looks back about 1,000 lines when a severity or text filter is used.
